@@ -7,10 +7,10 @@ env:
 
 on:
   push:
-    branches: [master]
+    branches: [master, multiplayer]
     tags: ['*']
   pull_request:
-    branches: [master]
+    branches: [master, multiplayer]
   workflow_dispatch:
 
 permissions:
@@ -54,10 +54,15 @@ jobs:
           echo 'gothic-linux-v${{ needs.setup.outputs.semver }}' >> build/opengothic/VERSION
 
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DOPENGOTHIC_BUILD_TESTS=ON
 
       - name: Build
         run: cmake --build build --target Gothic2Notr Spacer -j $(nproc)
+
+      - name: Test
+        run: |
+          cmake --build build --target NetTransportTest -j $(nproc)
+          ctest --test-dir build --output-on-failure
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
