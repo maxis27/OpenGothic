@@ -210,19 +210,25 @@ target_sources(Spacer PRIVATE ${SPACER_SOURCES} spacer/main.cpp)
 target_include_directories(Spacer PRIVATE "spacer")
 target_link_libraries(Spacer PRIVATE OpenGothic SpacerAssets)
 
-# multiplayer transport test: two processes exchanging packets over localhost
+# multiplayer tests
 option(OPENGOTHIC_BUILD_TESTS "Build and register OpenGothic tests" OFF)
 if(OPENGOTHIC_BUILD_TESTS)
+  # transport: two processes exchanging packets over localhost
   add_executable(NetTransportTest tests/net/nettransport_test.cpp common/net/nettransport.cpp)
   target_link_libraries(NetTransportTest PRIVATE enet)
+  # protocol: message encoding and the Hello/Welcome/Reject handshake over localhost
+  add_executable(NetProtocolTest tests/net/netprotocol_test.cpp common/net/netprotocol.cpp common/net/nettransport.cpp)
+  target_link_libraries(NetProtocolTest PRIVATE enet)
   if(NOT MSVC)
     target_compile_options(NetTransportTest PRIVATE -Wall -Wconversion -Werror)
+    target_compile_options(NetProtocolTest  PRIVATE -Wall -Wconversion -Werror)
   endif()
 
   enable_testing()
   add_test(NAME NetTransport
     COMMAND ${CMAKE_COMMAND} -DTEST_EXE=$<TARGET_FILE:NetTransportTest> -DPORT=47611
             -P ${CMAKE_SOURCE_DIR}/tests/net/run_nettransport_test.cmake)
+  add_test(NAME NetProtocol COMMAND NetProtocolTest 47612)
 endif()
 
 # installation
