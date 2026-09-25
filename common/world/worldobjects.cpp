@@ -239,6 +239,12 @@ void WorldObjects::tick(uint64_t dt, uint64_t dtPlayer) {
   auto plPos = pl!=nullptr ? pl->position() : cpos;
   for(auto& i:npcArr) {
     float dist = (i->position()-plPos).quadLength();
+    if(i->processPolicy()==NpcProcessPolicy::NetProxy) {
+      // keep policy, controlled by network code; still interacts with collision zones when near
+      if(dist<nearDist)
+        npcNear.push_back(i.get());
+      continue;
+      }
     if(dist<nearDist){
       npcNear.push_back(i.get());
       if(i.get()!=pl)

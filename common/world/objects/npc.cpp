@@ -476,6 +476,8 @@ float Npc::angleDir(float x, float z) {
   }
 
 bool Npc::resetPositionToTA() {
+  if(aiPolicy==NpcProcessPolicy::NetProxy)
+    return true; // position comes from network
   const bool g2       = owner.version().game==2;
   const bool isDragon = (g2 && guild()==GIL_DRAGON);
   const bool isDead   = this->isDead();
@@ -2343,6 +2345,11 @@ void Npc::tick(uint64_t dt) {
 
   if(!visual.pose().hasAnim())
     setAnim(AnimationSolver::Idle);
+
+  if(aiPolicy==NpcProcessPolicy::NetProxy) {
+    mvAlgo.tick(dt);
+    return;
+    }
 
   if(isDive()) {
     uint32_t gl = guild();
@@ -4229,6 +4236,8 @@ bool Npc::perceptionProcess(Npc &pl) {
   }
 
 bool Npc::perceptionProcess(Npc &pl, Npc* victim, float quadDist, PercType perc) {
+  if(aiPolicy==NpcProcessPolicy::NetProxy)
+    return false;
   if(!aiState.started && aiState.funcIni.isValid()) {
     // avoid ugly soft-lock (ZS_MM_Attack <-> B_MM_AssessWarn) for the orks near ramp
     return false;

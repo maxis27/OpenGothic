@@ -147,6 +147,7 @@ Marvin::Marvin() {
     {"insert %c",                  C_Insert},
 
     {"toggle gi",                  C_ToggleGI},
+    {"toggle netproxy",            C_ToggleNetProxy},
     {"toggle vsm",                 C_ToggleVsm},
     {"toggle rtsm",                C_ToggleRtsm},
     {"toggle pathtrace",           C_TogglePathtrace},
@@ -476,6 +477,22 @@ bool Marvin::exec(std::string_view v) {
     case C_TogglePathtrace:
       Gothic::inst().togglePathtrace();
       return true;
+    case C_ToggleNetProxy: {
+      // debug helper for multiplayer: turn focused npc into a network proxy (no AI) and back
+      Npc* player = Gothic::inst().player();
+      if(player==nullptr || player->target()==nullptr)
+        return false;
+      auto target = player->target();
+      if(target->processPolicy()==NpcProcessPolicy::NetProxy) {
+        target->setProcessPolicy(NpcProcessPolicy::AiNormal);
+        } else {
+        target->clearAiQueue();
+        target->clearSpeed();
+        target->setAnim(AnimationSolver::Idle);
+        target->setProcessPolicy(NpcProcessPolicy::NetProxy);
+        }
+      return true;
+      }
     }
 
   return true;
