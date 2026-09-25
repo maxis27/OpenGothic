@@ -219,9 +219,12 @@ if(OPENGOTHIC_BUILD_TESTS)
   # protocol: message encoding and the Hello/Welcome/Reject handshake over localhost
   add_executable(NetProtocolTest tests/net/netprotocol_test.cpp common/net/netprotocol.cpp common/net/nettransport.cpp)
   target_link_libraries(NetProtocolTest PRIVATE enet)
+  # address parsing of -host/-connect
+  add_executable(NetAddressTest tests/net/netaddress_test.cpp common/net/netaddress.cpp)
   if(NOT MSVC)
     target_compile_options(NetTransportTest PRIVATE -Wall -Wconversion -Werror)
     target_compile_options(NetProtocolTest  PRIVATE -Wall -Wconversion -Werror)
+    target_compile_options(NetAddressTest   PRIVATE -Wall -Wconversion -Werror)
   endif()
 
   enable_testing()
@@ -229,6 +232,7 @@ if(OPENGOTHIC_BUILD_TESTS)
     COMMAND ${CMAKE_COMMAND} -DTEST_EXE=$<TARGET_FILE:NetTransportTest> -DPORT=47611
             -P ${CMAKE_SOURCE_DIR}/tests/net/run_nettransport_test.cmake)
   add_test(NAME NetProtocol COMMAND NetProtocolTest 47612)
+  add_test(NAME NetAddress  COMMAND NetAddressTest)
 endif()
 
 # installation

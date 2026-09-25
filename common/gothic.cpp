@@ -22,6 +22,9 @@
 #include "utils/fileutil.h"
 #include "utils/inifile.h"
 
+#include "net/netprotocol.h"
+#include "net/nettransport.h"
+
 #include "commandline.h"
 #include "mainwindow.h"
 
@@ -241,10 +244,35 @@ Gothic::Gothic() {
 
   onSettingsChanged.bind(this,&Gothic::setupSettings);
   setupSettings();
+  startNetwork();
   }
 
 Gothic::~Gothic() {
   instance = nullptr;
+  }
+
+void Gothic::startNetwork() {
+  auto& cmd = CommandLine::inst();
+  if(cmd.netMode()==CommandLine::NetMode::None)
+    return;
+
+  auto       transport = std::make_unique<NetTransport>();
+  const int  port      = cmd.netPort();
+  if(cmd.netMode()==CommandLine::NetMode::Host) {
+    if(!transport->host(cmd.netPort(), NetProtocol::MaxPlayers-1)) {
+      Log::e("multiplayer: unable to host on port ", port, ", starting singleplayer");
+      return;
+      }
+    Log::i("multiplayer: hosting on port ", port);
+    } else {
+    const std::string host(cmd.netHost());
+    if(transport->connect(host, cmd.netPort())==NetTransport::InvalidPeer) {
+      Log::e("multiplayer: unable to connect to ", host, ":", port, ", starting singleplayer");
+      return;
+      }
+    Log::i("multiplayer: connecting to ", host, ":", port);
+    }
+  net = std::move(transport);
   }
 
 Gothic& Gothic::inst() {
