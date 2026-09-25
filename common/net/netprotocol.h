@@ -19,7 +19,7 @@
 namespace NetProtocol {
 
   // bump on every incompatible change of any message
-  constexpr uint16_t Version = 1;
+  constexpr uint16_t Version = 2;
   // "OGMP", identifies OpenGothic multiplayer traffic
   constexpr uint32_t Magic   = 0x504D474F;
 
@@ -36,6 +36,8 @@ namespace NetProtocol {
     Welcome = 2,
     Reject  = 3,
     Chat    = 4,
+    PlayerJoined = 5,
+    PlayerLeft   = 6,
     };
 
   enum class RejectReason : uint8_t {
@@ -71,7 +73,19 @@ namespace NetProtocol {
     std::string text;
     };
 
-  using Message = std::variant<Hello,Welcome,Reject,Chat>;
+  // server -> client: a player is in the session; right before Welcome the server sends one
+  // for every player already there (the host included), later one for every newcomer
+  struct PlayerJoined {
+    uint32_t    playerId = 0;
+    std::string name;
+    };
+
+  // server -> client: a player has left the session
+  struct PlayerLeft {
+    uint32_t    playerId = 0;
+    };
+
+  using Message = std::variant<Hello,Welcome,Reject,Chat,PlayerJoined,PlayerLeft>;
 
   std::vector<uint8_t> encode(const Message& msg);
   // Returns nothing for truncated, oversized or unknown packets.

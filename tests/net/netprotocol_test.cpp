@@ -57,6 +57,12 @@ void testEncoding() {
   auto chat = roundTrip(Chat{3, "Hello, Khorinis! \xC5\xBC\xC3\xB3\xC5\x82w"}, s);
   check(chat!=nullptr && chat->playerId==3 && chat->text=="Hello, Khorinis! \xC5\xBC\xC3\xB3\xC5\x82w", "Chat round trip");
 
+  auto joined = roundTrip(PlayerJoined{4, "Lares"}, s);
+  check(joined!=nullptr && joined->playerId==4 && joined->name=="Lares", "PlayerJoined round trip");
+
+  auto left = roundTrip(PlayerLeft{4}, s);
+  check(left!=nullptr && left->playerId==4, "PlayerLeft round trip");
+
   // too long strings are cut on encode
   auto longChat = roundTrip(Chat{1, std::string(MaxChatLength+100, 'a')}, s);
   check(longChat!=nullptr && longChat->text.size()==MaxChatLength, "Chat text is limited");

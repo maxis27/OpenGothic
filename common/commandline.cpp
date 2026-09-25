@@ -116,6 +116,11 @@ CommandLine::CommandLine(int argc, const char** argv) {
       const char* value = (i+1<argc && argv[i+1][0]!='-') ? argv[++i] : nullptr;
       setNetMode(arg=="-host" ? NetMode::Host : NetMode::Client, arg, value);
       }
+    else if(arg=="-name") {
+      ++i;
+      if(i<argc)
+        netPlayer = argv[i];
+      }
     else if(arg=="-rt") {
       ++i;
       if(i<argc)

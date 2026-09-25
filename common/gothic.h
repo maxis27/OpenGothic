@@ -24,7 +24,7 @@ class ParticlesDefinitions;
 class MusicDefinitions;
 class FightAi;
 class IniFile;
-class NetTransport;
+class NetSession;
 
 class Gothic final {
   public:
@@ -96,8 +96,10 @@ class Gothic final {
 
     void         setupGlobalScripts();
 
-    // multiplayer transport, started by -host/-connect; nullptr in singleplayer
-    NetTransport* netTransport() { return net.get(); }
+    // multiplayer session, started by -host/-connect; nullptr in singleplayer
+    NetSession*  netSession() { return net.get(); }
+    // service the multiplayer session; called every frame
+    void         tickNetwork();
 
     auto         loadingBanner() const -> const Tempest::Texture2d*;
     int          loadingProgress() const;
@@ -253,7 +255,7 @@ class Gothic final {
     std::unique_ptr<VisualFxDefinitions>    vfxDef;
     std::unique_ptr<ParticlesDefinitions>   particleDef;
     std::unique_ptr<MusicDefinitions>       music;
-    std::unique_ptr<NetTransport>           net;
+    std::unique_ptr<NetSession>             net;
 
     std::mutex                              syncSnd;
     Tempest::SoundDevice                    sndDev;

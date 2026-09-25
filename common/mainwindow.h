@@ -33,6 +33,7 @@
 #include "ui/videowidget.h"
 #include "ui/menuroot.h"
 #include "ui/consolewidget.h"
+#include "ui/chatinput.h"
 #include "ui/touchinput.h"
 
 #include "utils/keycodec.h"
@@ -86,6 +87,7 @@ class MainWindow : public Tempest::Window {
     void onBenchmarkFinished();
     void setGameImpl(std::unique_ptr<GameSession>&& w);
     void clearInput();
+    bool isChatAvailable() const;
     void setFullscreen(bool fs);
 
     void processMouse(Tempest::MouseEvent& event, bool enable);
@@ -149,6 +151,7 @@ class MainWindow : public Tempest::Window {
     DialogMenu                dialogs;
     DocumentMenu              document;
     ChapterScreen             chapter;
+    ChatInput                 chat;
     ConsoleWidget             console;
 #if defined(__MOBILE_PLATFORM__)
     TouchInput                mobileUi;
