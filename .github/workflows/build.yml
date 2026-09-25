@@ -7,10 +7,10 @@ env:
 
 on:
   push:
-    branches: [master]
+    branches: [master, multiplayer]
     tags: ['*']
   pull_request:
-    branches: [master]
+    branches: [master, multiplayer]
   workflow_dispatch:
 
 permissions:
@@ -58,6 +58,11 @@ jobs:
 
       - name: Build
         run: cmake --build build --target Gothic2Notr Spacer -j $(nproc)
+
+      - name: Test
+        run: |
+          cmake --build build --target NetTransportTest -j $(nproc)
+          ctest --test-dir build --output-on-failure
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
