@@ -109,6 +109,19 @@ class World final {
 
     auto                 takeHero() -> std::unique_ptr<Npc>;
     Npc*                 player() const { return npcPlayer; }
+
+    // Characters of the other players of a multiplayer session; player() stays the local one.
+    // Kept in sync with the session by NetWorldSync.
+    struct RemotePlayer final {
+      uint32_t playerId = 0;
+      Npc*     npc      = nullptr;
+      };
+    auto                 remotePlayers() const -> const std::vector<RemotePlayer>& { return remotePl; }
+    Npc*                 remotePlayer(uint32_t playerId) const;
+    // Spawns the default player character (PC_HERO) as a NetProxy npc, or returns the existing one.
+    Npc*                 addRemotePlayer(uint32_t playerId, std::string_view name, const Tempest::Vec3& pos, float rotation);
+    void                 removeRemotePlayer(uint32_t playerId);
+    auto                 netEntities() -> NetEntityRegistry& { return wobj.netEntities(); }
     Npc*                 findNpcByInstance(size_t instance, size_t n = 0);
     Item*                findItemByInstance(size_t instance, size_t n = 0);
     std::string_view     roomAt(const Tempest::Vec3& arr);
@@ -211,6 +224,7 @@ class World final {
       } bsp;
 
     Npc*                                  npcPlayer=nullptr;
+    std::vector<RemotePlayer>             remotePl;
 
     std::unique_ptr<DynamicWorld>         wdynamic;
     std::unique_ptr<WorldView>            wview;

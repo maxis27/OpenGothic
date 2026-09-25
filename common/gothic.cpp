@@ -23,6 +23,7 @@
 #include "utils/inifile.h"
 
 #include "net/netsession.h"
+#include "net/networldsync.h"
 
 #include "commandline.h"
 #include "mainwindow.h"
@@ -280,13 +281,18 @@ void Gothic::startNetwork() {
   }
 
 void Gothic::tickNetwork() {
-  if(net==nullptr)
-    return;
-  net->poll();
-  if(net->state()==NetSession::State::Closed) {
-    Log::i("multiplayer: session closed, continuing singleplayer");
-    net.reset();
+  if(net!=nullptr) {
+    net->poll();
+    if(net->state()==NetSession::State::Closed) {
+      Log::i("multiplayer: session closed, continuing singleplayer");
+      net.reset();
+      }
     }
+  if(checkLoading()!=LoadState::Idle)
+    return;
+  // spawns and removes the other players' characters; after the session is gone, removes the rest
+  if(auto w = world(); w!=nullptr && (net!=nullptr || !w->remotePlayers().empty()))
+    NetWorldSync::tick(net.get(), *w);
   }
 
 Gothic& Gothic::inst() {

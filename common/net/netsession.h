@@ -12,7 +12,8 @@
 #include "nettransport.h"
 
 // Multiplayer session on top of NetTransport and NetProtocol: the handshake, the list of
-// players and chat. The host is a player too (id HostPlayer) and relays chat between clients.
+// players, their characters in the host's world and chat. The host is a player too
+// (id HostPlayer) and relays chat between clients.
 // Independent of the game itself; poll() must be called regularly (every frame) from one thread.
 class NetSession final {
   public:
@@ -39,8 +40,18 @@ class NetSession final {
     State    state()    const { return st; }
     PlayerId playerId() const { return self; }
     size_t   playerCount() const { return players.size(); }
+    // Players in the session by id, this one included.
+    auto     playerList() const -> const std::map<PlayerId,std::string>& { return players; }
     // Name of a player in the session, empty when unknown.
     auto     playerName(PlayerId id) const -> std::string_view;
+
+    // Character of a player in the host's world, nullptr while the host hasn't spawned it.
+    using Avatar = NetProtocol::PlayerSpawn;
+    auto     avatar(PlayerId id) const -> const Avatar*;
+    // Host: the character of a player in the session is in the world. The clients are told
+    // when it is new or has another entity id than before; newcomers get all of them right
+    // after Welcome. Ignored on a client and for players not in the session.
+    void     setAvatar(const Avatar& a);
 
     // Service the network: handshake, chat, players joining and leaving.
     void     poll(uint32_t timeoutMs = 0);
@@ -73,6 +84,7 @@ class NetSession final {
     uint64_t                                         startTime = 0;
 
     std::map<PlayerId,std::string>                   players;
+    std::map<PlayerId,Avatar>                        avatars;
     // host: player of each connected peer, NoPlayer until its Hello is accepted
     std::unordered_map<NetTransport::PeerId,PlayerId> peers;
     PlayerId                                         nextPlayer = HostPlayer+1;

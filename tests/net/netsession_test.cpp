@@ -1,6 +1,8 @@
 // NetSession test, run in a single process: a host and two clients on localhost.
 //  - both clients are welcomed and know every player's name;
 //  - a chat line typed by one player shows up at every other player, with the sender's name;
+//  - the characters the host announces (setAvatar) reach every client, newcomers included,
+//    and only a new entity id is sent again;
 //  - a client leaving is announced to the others.
 // Usage: NetSessionTest <port>. Exits with 0 on success.
 
@@ -81,6 +83,20 @@ void testSession(uint16_t port) {
   bool ok = runUntil({&host,&diego}, [&]{ return diego.session->state()==NetSession::State::Online; });
   check(ok, "first client is welcomed");
 
+  // the host spawned characters for itself and Diego before Milten came
+  host.session->setAvatar({NetSession::HostPlayer, 10, 1, 2, 3, 90});
+  host.session->setAvatar({diego.session->playerId(), 11, 4, 5, 6, 180});
+  host.session->setAvatar({99, 12, 0, 0, 0, 0}); // no such player
+  diego.session->setAvatar({diego.session->playerId(), 13, 0, 0, 0, 0}); // clients can't
+  ok = runUntil({&host,&diego}, [&]{
+    auto a = diego.session->avatar(diego.session->playerId());
+    return diego.session->avatar(NetSession::HostPlayer)!=nullptr && a!=nullptr && a->entityId==11;
+    });
+  check(ok, "client learns the characters of the host and its own");
+  check(diego.session->avatar(NetSession::HostPlayer)->entityId==10 &&
+        diego.session->avatar(NetSession::HostPlayer)->rotation==90, "character data arrives intact");
+  check(host.session->avatar(99)==nullptr, "no character for an unknown player");
+
   milten.session = NetSession::connect("127.0.0.1", port, "Milten");
   check(milten.session!=nullptr, "second client starts connecting");
   if(milten.session==nullptr)
@@ -99,6 +115,24 @@ void testSession(uint16_t port) {
         diego.session->playerId()!=NetSession::HostPlayer, "players get distinct ids");
   check(host.saw("Diego joined the game") && host.saw("Milten joined the game"), "host announces newcomers");
   check(!milten.saw("Diego joined the game"), "players already there are not announced as newcomers");
+
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    return milten.session->avatar(NetSession::HostPlayer)!=nullptr && milten.session->avatar(diego.session->playerId())!=nullptr;
+    });
+  check(ok, "a newcomer gets the characters already in the world");
+  check(milten.session->avatar(milten.session->playerId())==nullptr, "the newcomer's own character isn't spawned yet");
+
+  host.session->setAvatar({milten.session->playerId(), 14, 7, 8, 9, 0});
+  // the same id again (a moved character) is not resent, a new id is
+  host.session->setAvatar({NetSession::HostPlayer, 10, 50, 50, 50, 0});
+  host.session->setAvatar({diego.session->playerId(), 15, 4, 5, 6, 180});
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    auto m = diego.session->avatar(milten.session->playerId());
+    auto d = milten.session->avatar(diego.session->playerId());
+    return m!=nullptr && m->entityId==14 && d!=nullptr && d->entityId==15;
+    });
+  check(ok, "new and respawned characters reach every client");
+  check(diego.session->avatar(NetSession::HostPlayer)->x==1, "an unchanged id is not sent again");
 
   // client -> everyone
   check(diego.session->sendChat("Hello from the Old Camp"), "client sends chat");
@@ -124,10 +158,15 @@ void testSession(uint16_t port) {
   check(!host.session->sendChat("   "), "blank chat is not sent");
 
   // leaving
+  const auto miltenId = milten.session->playerId();
   milten.session.reset();
   ok = runUntil({&host,&diego}, [&]{ return diego.saw("Milten left the game") && host.saw("Milten left the game"); });
   check(ok, "a leaving client is announced");
+  check(diego.session->avatar(miltenId)==nullptr && host.session->avatar(miltenId)==nullptr,
+        "the character of a leaving player is forgotten");
   check(host.session->playerCount()==2 && diego.session->playerCount()==2, "player lists shrink");
+  check(diego.session->avatar(NetSession::HostPlayer)!=nullptr && host.session->avatar(NetSession::HostPlayer)!=nullptr,
+        "characters of the remaining players stay");
 
   // host gone: the client notices and closes
   host.session.reset();
