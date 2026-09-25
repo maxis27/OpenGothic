@@ -211,16 +211,19 @@ target_include_directories(Spacer PRIVATE "spacer")
 target_link_libraries(Spacer PRIVATE OpenGothic SpacerAssets)
 
 # multiplayer transport test: two processes exchanging packets over localhost
-add_executable(NetTransportTest EXCLUDE_FROM_ALL tests/net/nettransport_test.cpp common/net/nettransport.cpp)
-target_link_libraries(NetTransportTest PRIVATE enet)
-if(NOT MSVC)
-  target_compile_options(NetTransportTest PRIVATE -Wall -Wconversion -Werror)
-endif()
+option(OPENGOTHIC_BUILD_TESTS "Build and register OpenGothic tests" OFF)
+if(OPENGOTHIC_BUILD_TESTS)
+  add_executable(NetTransportTest tests/net/nettransport_test.cpp common/net/nettransport.cpp)
+  target_link_libraries(NetTransportTest PRIVATE enet)
+  if(NOT MSVC)
+    target_compile_options(NetTransportTest PRIVATE -Wall -Wconversion -Werror)
+  endif()
 
-enable_testing()
-add_test(NAME NetTransport
-  COMMAND ${CMAKE_COMMAND} -DTEST_EXE=$<TARGET_FILE:NetTransportTest> -DPORT=47611
-          -P ${CMAKE_SOURCE_DIR}/tests/net/run_nettransport_test.cmake)
+  enable_testing()
+  add_test(NAME NetTransport
+    COMMAND ${CMAKE_COMMAND} -DTEST_EXE=$<TARGET_FILE:NetTransportTest> -DPORT=47611
+            -P ${CMAKE_SOURCE_DIR}/tests/net/run_nettransport_test.cmake)
+endif()
 
 # installation
 install(TARGETS ${PROJECT_NAME} DESTINATION bin)
