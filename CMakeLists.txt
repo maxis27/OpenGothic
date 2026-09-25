@@ -224,11 +224,14 @@ if(OPENGOTHIC_BUILD_TESTS)
   # session: handshake, player list and chat between a host and two clients over localhost
   add_executable(NetSessionTest tests/net/netsession_test.cpp common/net/netsession.cpp common/net/netprotocol.cpp common/net/nettransport.cpp)
   target_link_libraries(NetSessionTest PRIVATE enet)
+  # entity registry: NetEntityId <-> Npc*/Item*
+  add_executable(NetEntityTest tests/net/netentity_test.cpp common/net/netentity.cpp)
   if(NOT MSVC)
     target_compile_options(NetTransportTest PRIVATE -Wall -Wconversion -Werror)
     target_compile_options(NetProtocolTest  PRIVATE -Wall -Wconversion -Werror)
     target_compile_options(NetAddressTest   PRIVATE -Wall -Wconversion -Werror)
     target_compile_options(NetSessionTest   PRIVATE -Wall -Wconversion -Werror)
+    target_compile_options(NetEntityTest    PRIVATE -Wall -Wconversion -Werror)
   endif()
 
   enable_testing()
@@ -238,6 +241,7 @@ if(OPENGOTHIC_BUILD_TESTS)
   add_test(NAME NetProtocol COMMAND NetProtocolTest 47612)
   add_test(NAME NetAddress  COMMAND NetAddressTest)
   add_test(NAME NetSession  COMMAND NetSessionTest 47613)
+  add_test(NAME NetEntity   COMMAND NetEntityTest)
 endif()
 
 # installation
