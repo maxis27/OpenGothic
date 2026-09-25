@@ -1,0 +1,178 @@
+// NetSession test, run in a single process: a host and two clients on localhost.
+//  - both clients are welcomed and know every player's name;
+//  - a chat line typed by one player shows up at every other player, with the sender's name;
+//  - a client leaving is announced to the others.
+// Usage: NetSessionTest <port>. Exits with 0 on success.
+
+#include "net/netsession.h"
+
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <memory>
+#include <string>
+#include <thread>
+#include <vector>
+
+namespace {
+
+using Clock = std::chrono::steady_clock;
+
+constexpr auto Timeout = std::chrono::seconds(10);
+
+int failures = 0;
+
+void check(bool cond, const char* what) {
+  if(cond)
+    return;
+  std::fprintf(stderr, "FAILED: %s\n", what);
+  ++failures;
+  }
+
+struct Player {
+  std::unique_ptr<NetSession> session;
+  std::vector<std::string>    lines;
+
+  void attach(const char* tag) {
+    session->onMessage = [this,tag](std::string_view s) {
+      std::printf("[%s] %.*s\n", tag, int(s.size()), s.data());
+      lines.emplace_back(s);
+      };
+    }
+
+  bool saw(const std::string& line) const {
+    for(auto& l:lines)
+      if(l==line)
+        return true;
+    return false;
+    }
+  };
+
+template<class Pred>
+bool runUntil(std::vector<Player*> all, Pred done) {
+  auto deadline = Clock::now() + Timeout;
+  while(Clock::now()<deadline) {
+    for(auto p:all)
+      if(p->session)
+        p->session->poll();
+    if(done())
+      return true;
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+  return false;
+  }
+
+void testSession(uint16_t port) {
+  Player host, diego, milten;
+  host.session = NetSession::host(port, "Lee", "NEWWORLD.ZEN");
+  if(host.session==nullptr) {
+    check(false, "host listens");
+    return;
+    }
+  host.attach("Lee");
+  check(host.session->isHost() && host.session->state()==NetSession::State::Online, "host is online at once");
+
+  diego.session = NetSession::connect("127.0.0.1", port, "Diego");
+  check(diego.session!=nullptr, "first client starts connecting");
+  if(diego.session==nullptr)
+    return;
+  diego.attach("Diego");
+
+  bool ok = runUntil({&host,&diego}, [&]{ return diego.session->state()==NetSession::State::Online; });
+  check(ok, "first client is welcomed");
+
+  milten.session = NetSession::connect("127.0.0.1", port, "Milten");
+  check(milten.session!=nullptr, "second client starts connecting");
+  if(milten.session==nullptr)
+    return;
+  milten.attach("Milten");
+
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    return milten.session->state()==NetSession::State::Online && diego.saw("Milten joined the game");
+    });
+  check(ok, "second client is welcomed and announced");
+  check(host.session->playerCount()==3 && diego.session->playerCount()==3 && milten.session->playerCount()==3,
+        "everyone knows all three players");
+  check(milten.session->playerName(NetSession::HostPlayer)=="Lee", "clients know the host's name");
+  check(milten.session->playerName(diego.session->playerId())=="Diego", "a newcomer knows who was there before");
+  check(diego.session->playerId()!=milten.session->playerId() &&
+        diego.session->playerId()!=NetSession::HostPlayer, "players get distinct ids");
+  check(host.saw("Diego joined the game") && host.saw("Milten joined the game"), "host announces newcomers");
+  check(!milten.saw("Diego joined the game"), "players already there are not announced as newcomers");
+
+  // client -> everyone
+  check(diego.session->sendChat("Hello from the Old Camp"), "client sends chat");
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    return host.saw("Diego: Hello from the Old Camp") && milten.saw("Diego: Hello from the Old Camp");
+    });
+  check(ok, "client chat reaches the host and the other client");
+  check(diego.saw("Diego: Hello from the Old Camp"), "sender sees own chat line");
+
+  // host -> everyone
+  check(host.session->sendChat("Welcome to the New Camp"), "host sends chat");
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    return diego.saw("Lee: Welcome to the New Camp") && milten.saw("Lee: Welcome to the New Camp");
+    });
+  check(ok, "host chat reaches both clients");
+
+  // no echo back to the sender, no empty lines
+  size_t diegoCount = 0;
+  for(auto& l:diego.lines)
+    if(l=="Diego: Hello from the Old Camp")
+      ++diegoCount;
+  check(diegoCount==1, "sender does not get its chat line back");
+  check(!host.session->sendChat("   "), "blank chat is not sent");
+
+  // leaving
+  milten.session.reset();
+  ok = runUntil({&host,&diego}, [&]{ return diego.saw("Milten left the game") && host.saw("Milten left the game"); });
+  check(ok, "a leaving client is announced");
+  check(host.session->playerCount()==2 && diego.session->playerCount()==2, "player lists shrink");
+
+  // host gone: the client notices and closes
+  host.session.reset();
+  ok = runUntil({&diego}, [&]{ return diego.session->state()==NetSession::State::Closed; });
+  check(ok, "client notices the host is gone");
+  check(!diego.session->sendChat("anyone?"), "no chat once closed");
+  }
+
+void testNoHost(uint16_t port) {
+  // nobody listens on this port: the client gives up and reports it
+  Player lost;
+  lost.session = NetSession::connect("127.0.0.1", port, "Lester");
+  if(lost.session==nullptr) {
+    check(false, "client starts connecting");
+    return;
+    }
+  lost.attach("Lester");
+  bool ok = runUntil({&lost}, [&]{ return lost.session->state()==NetSession::State::Closed; });
+  check(ok, "connecting to nobody fails");
+  check(lost.saw("Unable to connect to the host"), "failure is reported");
+  }
+
+bool parsePort(const char* str, uint16_t& port) {
+  char* end = nullptr;
+  long  v   = std::strtol(str, &end, 10);
+  if(end==str || *end!='\0' || v<=0 || v>65535)
+    return false;
+  port = uint16_t(v);
+  return true;
+  }
+
+}
+
+int main(int argc, char** argv) {
+  uint16_t port = 0;
+  if(argc!=2 || !parsePort(argv[1], port)) {
+    std::fprintf(stderr, "usage: %s <port>\n", argv[0]);
+    return 2;
+    }
+  testSession(port);
+  testNoHost(port);
+  if(failures>0) {
+    std::fprintf(stderr, "%d check(s) failed\n", failures);
+    return 1;
+    }
+  std::printf("all checks passed\n");
+  return 0;
+  }

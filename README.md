@@ -187,3 +187,4 @@ Rendering distance is not customizable.
 | `-window`              | windowed debugging mode (not to be used for playing)             |
 | `-host <port>`         | multiplayer (experimental): host a game on the given UDP port    |
 | `-connect <ip:port>`   | multiplayer (experimental): join a game hosted at ip:port        |
+| `-name <name>`         | multiplayer (experimental): player name shown in chat            |

@@ -87,6 +87,17 @@ void write(Writer& w, const Chat& m) {
   w.str(m.text, MaxChatLength);
   }
 
+void write(Writer& w, const PlayerJoined& m) {
+  w.u8 (uint8_t(MsgType::PlayerJoined));
+  w.u32(m.playerId);
+  w.str(m.name, MaxNameLength);
+  }
+
+void write(Writer& w, const PlayerLeft& m) {
+  w.u8 (uint8_t(MsgType::PlayerLeft));
+  w.u32(m.playerId);
+  }
+
 std::optional<Message> readHello(Reader& r) {
   Hello    m;
   uint32_t magic = 0;
@@ -123,6 +134,20 @@ std::optional<Message> readChat(Reader& r) {
   return m;
   }
 
+std::optional<Message> readPlayerJoined(Reader& r) {
+  PlayerJoined m;
+  if(!r.u32(m.playerId) || !r.str(m.name, MaxNameLength) || !r.atEnd())
+    return std::nullopt;
+  return m;
+  }
+
+std::optional<Message> readPlayerLeft(Reader& r) {
+  PlayerLeft m;
+  if(!r.u32(m.playerId) || !r.atEnd())
+    return std::nullopt;
+  return m;
+  }
+
 bool isValidName(const std::string& name) {
   if(name.empty() || name.size()>MaxNameLength)
     return false;
@@ -150,6 +175,8 @@ std::optional<Message> NetProtocol::decode(const uint8_t* data, size_t size) {
     case MsgType::Welcome: return readWelcome(r);
     case MsgType::Reject:  return readReject(r);
     case MsgType::Chat:    return readChat(r);
+    case MsgType::PlayerJoined: return readPlayerJoined(r);
+    case MsgType::PlayerLeft:   return readPlayerLeft(r);
     }
   return std::nullopt;
   }

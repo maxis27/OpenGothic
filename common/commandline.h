@@ -57,6 +57,7 @@ class CommandLine {
     NetMode             netMode()          const { return net;          }
     std::string_view    netHost()          const { return netHostName;  } // Client only
     uint16_t            netPort()          const { return netPortNum;   }
+    std::string_view    netName()          const { return netPlayer;    }
 
     std::string         wrldDef;
 
@@ -92,5 +93,6 @@ class CommandLine {
     NetMode             net          = NetMode::None;
     std::string         netHostName;
     uint16_t            netPortNum   = 0;
+    std::string         netPlayer    = "Player";
   };
 

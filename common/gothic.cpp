@@ -22,8 +22,7 @@
 #include "utils/fileutil.h"
 #include "utils/inifile.h"
 
-#include "net/netprotocol.h"
-#include "net/nettransport.h"
+#include "net/netsession.h"
 
 #include "commandline.h"
 #include "mainwindow.h"
@@ -256,23 +255,38 @@ void Gothic::startNetwork() {
   if(cmd.netMode()==CommandLine::NetMode::None)
     return;
 
-  auto       transport = std::make_unique<NetTransport>();
-  const int  port      = cmd.netPort();
+  const int port = cmd.netPort();
   if(cmd.netMode()==CommandLine::NetMode::Host) {
-    if(!transport->host(cmd.netPort(), NetProtocol::MaxPlayers-1)) {
+    net = NetSession::host(cmd.netPort(), cmd.netName(), defaultWorld());
+    if(net==nullptr) {
       Log::e("multiplayer: unable to host on port ", port, ", starting singleplayer");
       return;
       }
     Log::i("multiplayer: hosting on port ", port);
     } else {
     const std::string host(cmd.netHost());
-    if(transport->connect(host, cmd.netPort())==NetTransport::InvalidPeer) {
+    net = NetSession::connect(host, cmd.netPort(), cmd.netName());
+    if(net==nullptr) {
       Log::e("multiplayer: unable to connect to ", host, ":", port, ", starting singleplayer");
       return;
       }
     Log::i("multiplayer: connecting to ", host, ":", port);
     }
-  net = std::move(transport);
+
+  net->onMessage = [this](std::string_view msg) {
+    Log::i("multiplayer: ", msg);
+    onPrint(msg);
+    };
+  }
+
+void Gothic::tickNetwork() {
+  if(net==nullptr)
+    return;
+  net->poll();
+  if(net->state()==NetSession::State::Closed) {
+    Log::i("multiplayer: session closed, continuing singleplayer");
+    net.reset();
+    }
   }
 
 Gothic& Gothic::inst() {

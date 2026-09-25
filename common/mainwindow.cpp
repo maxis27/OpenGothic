@@ -22,6 +22,7 @@
 #include "game/globaleffects.h"
 #include "utils/gthfont.h"
 #include "utils/dbgpainter.h"
+#include "net/netsession.h"
 
 #include "commandline.h"
 #include "gothic.h"
@@ -120,6 +121,7 @@ MainWindow::~MainWindow() {
   takeWidget(&dialogs);
   takeWidget(&inventory);
   takeWidget(&chapter);
+  takeWidget(&chat);
   takeWidget(&document);
   takeWidget(&video);
   takeWidget(&rootMenu);
@@ -141,6 +143,7 @@ void MainWindow::setupUi() {
   addWidget(&dialogs);
   addWidget(&inventory);
   addWidget(&chapter);
+  addWidget(&chat);
   addWidget(&video);
   addWidget(&rootMenu);
 #if defined(__MOBILE_PLATFORM__)
@@ -156,6 +159,11 @@ void MainWindow::setupUi() {
   Gothic::inst().onPrint       .bind(&dialogs,&DialogMenu::print);
 
   Gothic::inst().onIntroChapter.bind(&chapter, &ChapterScreen::show);
+
+  chat.onSend = [](std::string_view text) {
+    if(auto net = Gothic::inst().netSession())
+      net->sendChat(text);
+    };
   Gothic::inst().onShowDocument.bind(&document,&DocumentMenu::show);
   }
 
@@ -416,6 +424,12 @@ void MainWindow::keyDownEvent(KeyEvent &event) {
       }
     }
 
+  if(chat.isActive()) {
+    chat.keyDownEvent(event);
+    uiKeyUp=&chat;
+    return;
+    }
+
   if(chapter.isActive()){
     event.accept();
     chapter.keyDownEvent(event);
@@ -453,6 +467,14 @@ void MainWindow::keyDownEvent(KeyEvent &event) {
     }
   uiKeyUp=nullptr;
 
+  if(event.key==Event::K_T && isChatAvailable()) {
+    clearInput();
+    chat.open();
+    uiKeyUp=&chat;
+    event.accept();
+    return;
+    }
+
   auto act     = keycodec.tr(event);
   auto mapping = keycodec.mapping(event);
   player.onKeyPressed(act,event.key,mapping);
@@ -474,6 +496,11 @@ void MainWindow::keyRepeatEvent(KeyEvent& event) {
     rootMenu.keyRepeatEvent(event);
     if(event.isAccepted())
       return;
+    }
+  if(uiKeyUp==&chat){
+    if(chat.isActive())
+      chat.keyRepeatEvent(event);
+    return;
     }
   if(uiKeyUp==&chapter){
     if(event.isAccepted())
@@ -503,6 +530,11 @@ void MainWindow::keyUpEvent(KeyEvent &event) {
   if(uiKeyUp==&rootMenu){
     if(event.isAccepted())
       return;
+    }
+  if(uiKeyUp==&chat){
+    // the key that opened or closed the chat, or one typed into it
+    event.accept();
+    return;
     }
   if(uiKeyUp==&chapter){
     chapter.keyUpEvent(event);
@@ -877,6 +909,9 @@ uint64_t MainWindow::tick() {
     return 0;
   lastTick  = time;
 
+  // also while loading or paused, so peers don't time out
+  Gothic::inst().tickNetwork();
+
   auto st = Gothic::inst().checkLoading();
   if(st==Gothic::LoadState::Finalize || st==Gothic::LoadState::FailedLoad || st==Gothic::LoadState::FailedSave) {
     Gothic::inst().finishLoading();
@@ -1203,6 +1238,13 @@ void MainWindow::setGameImpl(std::unique_ptr<GameSession> &&w) {
   inventory.onWorldChanged();
   dialogs  .onWorldChanged();
   Gothic::inst().setGame(std::move(w));
+  }
+
+bool MainWindow::isChatAvailable() const {
+  auto net = Gothic::inst().netSession();
+  if(net==nullptr || net->state()!=NetSession::State::Online)
+    return false;
+  return Gothic::inst().player()!=nullptr && !dialogs.isActive() && !document.isActive() && !inventory.isActive();
   }
 
 void MainWindow::clearInput() {
