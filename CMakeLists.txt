@@ -118,6 +118,11 @@ include_directories(lib/TinySoundFont)
 # Rapidjson
 include_directories(lib/rapidjson/include)
 
+# ENet
+add_subdirectory(lib/enet EXCLUDE_FROM_ALL)
+include_directories(lib/enet/include)
+target_link_libraries(${PROJECT_NAME} enet)
+
 # Tempest
 if(WIN32)
   set(TEMPEST_BUILD_SHARED ON  CACHE INTERNAL "")
