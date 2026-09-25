@@ -14,6 +14,7 @@
 #include "utils/installdetect.h"
 #include "utils/fileutil.h"
 #include "utils/string_frm.h"
+#include "net/netaddress.h"
 
 using namespace Tempest;
 using namespace FileUtil;
@@ -111,6 +112,10 @@ CommandLine::CommandLine(int argc, const char** argv) {
     else if(arg=="-validation" || arg=="-v") {
       isDebug  = true;
       }
+    else if(arg=="-host" || arg=="-connect") {
+      const char* value = (i+1<argc && argv[i+1][0]!='-') ? argv[++i] : nullptr;
+      setNetMode(arg=="-host" ? NetMode::Host : NetMode::Client, arg, value);
+      }
     else if(arg=="-rt") {
       ++i;
       if(i<argc)
@@ -195,6 +200,34 @@ CommandLine::CommandLine(int argc, const char** argv) {
       }
     throw GothicNotFoundException("gothic not found!"); // TODO: user-friendly message-box
     }
+  }
+
+void CommandLine::setNetMode(NetMode mode, std::string_view flag, const char* value) {
+  if(net!=NetMode::None) {
+    Log::e("only one of -host and -connect can be given, ignoring ", flag);
+    return;
+    }
+  if(value==nullptr) {
+    Log::e(flag, mode==NetMode::Host ? " requires a port" : " requires an address <ip:port>");
+    return;
+    }
+  if(mode==NetMode::Host) {
+    auto port = NetAddress::parsePort(value);
+    if(!port) {
+      Log::e("invalid port for -host: \"", value, "\", expected a number in range 1..65535");
+      return;
+      }
+    netPortNum = *port;
+    } else {
+    auto ep = NetAddress::parseEndpoint(value);
+    if(!ep) {
+      Log::e("invalid address for -connect: \"", value, "\", expected <ip:port>");
+      return;
+      }
+    netHostName = std::move(ep->host);
+    netPortNum  = ep->port;
+    }
+  net = mode;
   }
 
 const CommandLine& CommandLine::inst() {

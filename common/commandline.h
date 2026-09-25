@@ -23,6 +23,11 @@ class CommandLine {
       Vulkan,
       DirectX12
       };
+    enum class NetMode : uint8_t {
+      None,   // singleplayer
+      Host,   // -host <port>: listen server
+      Client, // -connect <ip:port>
+      };
     auto                graphicsApi() const -> GraphicBackend;
     std::u16string_view rootPath() const;
     std::u16string      scriptPath() const;
@@ -49,10 +54,15 @@ class CommandLine {
     bool                aaPreset()         const { return aaPresetId;   }
     std::string_view    defaultSave()      const { return saveDef;    }
 
+    NetMode             netMode()          const { return net;          }
+    std::string_view    netHost()          const { return netHostName;  } // Client only
+    uint16_t            netPort()          const { return netPortNum;   }
+
     std::string         wrldDef;
 
   private:
     bool                validateGothicPath() const;
+    void                setNetMode(NetMode mode, std::string_view flag, const char* value);
 
     GraphicBackend      graphics = GraphicBackend::Vulkan;
     std::u16string      gpath, gmod;
@@ -79,5 +89,8 @@ class CommandLine {
     bool                forceG2      = false;
     bool                forceG2NR    = false;
     uint32_t            aaPresetId = 0;
+    NetMode             net          = NetMode::None;
+    std::string         netHostName;
+    uint16_t            netPortNum   = 0;
   };
 

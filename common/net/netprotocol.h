@@ -23,6 +23,9 @@ namespace NetProtocol {
   // "OGMP", identifies OpenGothic multiplayer traffic
   constexpr uint32_t Magic   = 0x504D474F;
 
+  // players in one session, the host included
+  constexpr size_t   MaxPlayers     = 8;
+
   constexpr size_t   MaxNameLength  = 32;
   constexpr size_t   MaxWorldLength = 64;
   constexpr size_t   MaxChatLength  = 512;

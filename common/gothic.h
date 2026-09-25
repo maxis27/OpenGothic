@@ -24,6 +24,7 @@ class ParticlesDefinitions;
 class MusicDefinitions;
 class FightAi;
 class IniFile;
+class NetTransport;
 
 class Gothic final {
   public:
@@ -94,6 +95,9 @@ class Gothic final {
     auto         questLog() const -> const QuestLog*;
 
     void         setupGlobalScripts();
+
+    // multiplayer transport, started by -host/-connect; nullptr in singleplayer
+    NetTransport* netTransport() { return net.get(); }
 
     auto         loadingBanner() const -> const Tempest::Texture2d*;
     int          loadingProgress() const;
@@ -249,6 +253,7 @@ class Gothic final {
     std::unique_ptr<VisualFxDefinitions>    vfxDef;
     std::unique_ptr<ParticlesDefinitions>   particleDef;
     std::unique_ptr<MusicDefinitions>       music;
+    std::unique_ptr<NetTransport>           net;
 
     std::mutex                              syncSnd;
     Tempest::SoundDevice                    sndDev;
@@ -270,6 +275,7 @@ class Gothic final {
 
     void                                    detectGothicVersion();
     void                                    setupSettings();
+    void                                    startNetwork();
 
     auto                                    getDocument(int id) -> std::unique_ptr<DocumentMenu::Show>&;
 

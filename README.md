@@ -185,3 +185,5 @@ Rendering distance is not customizable.
 | `-ms <boolean>`        | explicitly enable or disable meshlets                            |
 | `-aa <number>`         | enable anti-aliasing (number = 1-2, 2 = most expensive AA)       |
 | `-window`              | windowed debugging mode (not to be used for playing)             |
+| `-host <port>`         | multiplayer (experimental): host a game on the given UDP port    |
+| `-connect <ip:port>`   | multiplayer (experimental): join a game hosted at ip:port        |
