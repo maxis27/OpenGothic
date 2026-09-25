@@ -3,6 +3,8 @@
 #include "world/focus.h"
 #include "utils/keycodec.h"
 #include "constants.h"
+#include "playerintent.h"
+#include "playermovement.h"
 
 #include <array>
 
@@ -49,31 +51,8 @@ class PlayerControl final {
     bool  tickCameraMove(uint64_t dt);
 
   private:
-    enum WeaponAction : uint8_t {
-      WeaponClose,
-      WeaponMele,
-      WeaponBow,
-      Weapon3,
-      Weapon4,
-      Weapon5,
-      Weapon6,
-      Weapon7,
-      Weapon8,
-      Weapon9,
-      Weapon10,
-
-      Last,
-      };
-
-    enum FocusAction : uint8_t {
-      ActForward=0,
-      ActBack   =1,
-      ActLeft   =2,
-      ActRight  =3,
-      ActGeneric=4,
-      ActMove   =5,
-      ActKill   =6,
-      };
+    using WeaponAction = PlayerIntent::WeaponAction;
+    using FocusAction  = PlayerIntent::CombatAction;
 
     using Action=KeyCodec::Action;
 
@@ -136,21 +115,12 @@ class PlayerControl final {
       } movement;
     
     bool           ctrl[Action::Last]={};
-    bool           wctrl[WeaponAction::Last]={};
-    bool           actrl[7]={};
-
-    WeaponAction   wctrlLast = WeaponAction::WeaponMele; //!< Reminder for weapon toggle.
+    PlayerIntent   intent;
+    PlayerMovement mvPlayer;
 
     bool           cacheFocus=false;
     Focus          currentFocus;
-    float          rotMouse=0;
-    float          rotMouseY=0;
-    bool           casting = false;
     size_t         pickLockProgress = 0;
-
-    float          runAngleDest   = 0.f;
-    uint64_t       turnAniSmooth  = 0;
-    int            rotationAni    = 0;
     bool           g2Ctrl         = false;
 
     DialogMenu&    dlg;
@@ -167,16 +137,11 @@ class PlayerControl final {
     Focus          findFocus(const Focus* prev) const;
 
     void           clrDraw();
-    void           implMove(uint64_t dt);
-    void           implMoveMobsi(Npc& pl, uint64_t dt);
     void           processPickLock(Npc& pl, Interactive& inter, KeyCodec::Action key);
     void           processLadder(Npc& pl, Interactive& inter, KeyCodec::Action key);
     void           quitPicklock(Npc& pl);
-    void           setPos(std::array<float,3> a, uint64_t dt, float speed);
-    void           assignRunAngle(Npc& pl, float rotation, uint64_t dt);
-    void           setAnimRotate (Npc& pl, float rotation, int anim, bool force, uint64_t dt);
-    void           processAutoRotate(Npc& pl, float& rot, uint64_t dt);
-
+    void           updateIntent();
+    void           applyIntentFeedback();
 
     //////////////////////////////////
     // Helper functions for movement

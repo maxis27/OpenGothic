@@ -72,36 +72,36 @@ void PlayerControl::onKeyPressed(KeyCodec::Action a, Tempest::KeyEvent::KeyType 
   if(pl!=nullptr) {
     if(a==Action::Weapon) {
       if(ws!=WeaponState::NoWeapon) //Currently a weapon is active
-        wctrl[WeaponClose] = true;
+        intent.weapon[PlayerIntent::WeaponClose] = true;
       else {
-        if(wctrlLast>=WeaponAction::Weapon3 && pl->inventory().currentSpell(static_cast<uint8_t>(wctrlLast-3))==nullptr)
-          wctrlLast=WeaponAction::WeaponBow;  //Spell no longer available -> fallback to Bow.
-        if(wctrlLast==WeaponAction::WeaponBow && pl->currentRangedWeapon()==nullptr)
-          wctrlLast=WeaponAction::WeaponMele; //Bow no longer available -> fallback to Mele.
-        wctrl[wctrlLast] = true;
+        if(intent.weaponLast>=PlayerIntent::Weapon3 && pl->inventory().currentSpell(static_cast<uint8_t>(intent.weaponLast-3))==nullptr)
+          intent.weaponLast=PlayerIntent::WeaponBow;  //Spell no longer available -> fallback to Bow.
+        if(intent.weaponLast==PlayerIntent::WeaponBow && pl->currentRangedWeapon()==nullptr)
+          intent.weaponLast=PlayerIntent::WeaponMele; //Bow no longer available -> fallback to Mele.
+        intent.weapon[intent.weaponLast] = true;
         }
       return;
       }
 
     if(a==Action::WeaponMele) {
       if(ws==WeaponState::Fist || ws==WeaponState::W1H || ws==WeaponState::W2H)
-        wctrl[WeaponClose] = true; else
-        wctrl[WeaponMele ] = true;
+        intent.weapon[PlayerIntent::WeaponClose] = true; else
+        intent.weapon[PlayerIntent::WeaponMele] = true;
       return;
       }
 
     if(a==Action::WeaponBow) {
       if(ws==WeaponState::Bow || ws==WeaponState::CBow)
-        wctrl[WeaponClose] = true; else
-        wctrl[WeaponBow  ] = true;
+        intent.weapon[PlayerIntent::WeaponClose] = true; else
+        intent.weapon[PlayerIntent::WeaponBow] = true;
       return;
       }
 
     if(a>=Action::WeaponMage3 && a<=Action::WeaponMage10) {
       int id = (a-Action::WeaponMage3+3);
       if(ws==WeaponState::Mage && slot==id)
-        wctrl[WeaponClose] = true; else
-        wctrl[id         ] = true;
+        intent.weapon[PlayerIntent::WeaponClose] = true; else
+        intent.weapon[id] = true;
       return;
       }
 
@@ -117,20 +117,20 @@ void PlayerControl::onKeyPressed(KeyCodec::Action a, Tempest::KeyEvent::KeyType 
   if((ctrl[KeyCodec::ActionGeneric] || actTunneling) && !g2Ctrl) {
     if(a==Action::Forward) {
       if(pl!=nullptr && pl->target()!=nullptr && pl->canFinish(*pl->target()) && !pl->isAttackAnim()) {
-        fk = ActKill;
+        fk = PlayerIntent::ActKill;
         } else {
-        fk = ActForward;
+        fk = PlayerIntent::ActForward;
         }
       }
     if(ws==WeaponState::Fist || ws==WeaponState::W1H || ws==WeaponState::W2H) {
       if(a==Action::Back)
-        fk = ActBack;
+        fk = PlayerIntent::ActBack;
       }
     if(ws!=WeaponState::NoWeapon && !g2Ctrl && !pl->hasState(BS_RUN)) {
       if(a==Action::Left  || a==Action::RotateL)
-        fk = ActLeft;
+        fk = PlayerIntent::ActLeft;
       if(a==Action::Right || a==Action::RotateR)
-        fk = ActRight;
+        fk = PlayerIntent::ActRight;
       }
     }
 
@@ -138,41 +138,41 @@ void PlayerControl::onKeyPressed(KeyCodec::Action a, Tempest::KeyEvent::KeyType 
     if(ws!=WeaponState::NoWeapon) {
       if(a==Action::ActionGeneric) {
         if(pl!=nullptr && pl->target()!=nullptr && pl->canFinish(*pl->target()) && !pl->isAttackAnim()) {
-          fk = ActKill;
+          fk = PlayerIntent::ActKill;
           } else {
           if(this->wantsToMoveForward())
-            fk = ActMove; else
-            fk = ActForward;
+            fk = PlayerIntent::ActMove; else
+            fk = PlayerIntent::ActForward;
           }
         }
       }
     if(ws==WeaponState::Fist || ws==WeaponState::W1H || ws==WeaponState::W2H) {
       if(a==Action::Parade)
-        fk = ActBack;
+        fk = PlayerIntent::ActBack;
       }
     if(ws!=WeaponState::NoWeapon && !pl->hasState(BS_RUN)) {
       if(a==Action::ActionLeft)
-        fk = ActLeft;
+        fk = PlayerIntent::ActLeft;
       if(a==Action::ActionRight)
-        fk = ActRight;
+        fk = PlayerIntent::ActRight;
       }
     }
 
   if(fk>=0) {
-    std::memset(actrl,0,sizeof(actrl));
-    actrl[ActGeneric] = ctrl[KeyCodec::ActionGeneric];
-    actrl[fk]         = true;
+    intent.clearCombat();
+    intent.combat[PlayerIntent::ActGeneric] = ctrl[KeyCodec::ActionGeneric];
+    intent.combat[fk]         = true;
 
     ctrl[a] = true;
     return;
     }
 
   if(a==KeyCodec::ActionGeneric) {
-    FocusAction fk = ActGeneric;
+    FocusAction fk = PlayerIntent::ActGeneric;
     if(this->wantsToMoveForward())
-      fk = ActMove;
-    std::memset(actrl,0,sizeof(actrl));
-    actrl[fk] = true;
+      fk = PlayerIntent::ActMove;
+    intent.clearCombat();
+    intent.combat[fk] = true;
     ctrl[a]   = true;
     return;
     }
@@ -220,9 +220,9 @@ void PlayerControl::onKeyReleased(KeyCodec::Action a, KeyCodec::Mapping mapping)
   auto ws = pl==nullptr ? WeaponState::NoWeapon : pl->weaponState();
   if(ws==WeaponState::Bow || ws==WeaponState::CBow || ws==WeaponState::Mage) {
     if(a==KeyCodec::ActionGeneric || (!g2Ctrl && ws==WeaponState::Mage && a==KeyCodec::Forward))
-      std::memset(actrl,0,sizeof(actrl));
+      intent.clearCombat();
     } else {
-    std::memset(actrl,0,sizeof(actrl));
+    intent.clearCombat();
     }
   }
 
@@ -248,8 +248,8 @@ bool PlayerControl::isPressed(KeyCodec::Action a) const {
   }
 
 void PlayerControl::onRotateMouse(float dAngleX, float dAngleY) {
-  rotMouse  += dAngleX;
-  rotMouseY += dAngleY;
+  intent.rotMouse  += dAngleX;
+  intent.rotMouseY += dAngleY;
   }
 
 void PlayerControl::drawVobRay(DbgPainter& p) const {
@@ -394,11 +394,11 @@ void PlayerControl::moveFocus(FocusAction act) {
     if(!w->testFocusNpc(npc))
       continue;
 
-    if(act==ActLeft && p.x<pos.x && (next==nullptr || npos.x<p.x)) {
+    if(act==PlayerIntent::ActLeft && p.x<pos.x && (next==nullptr || npos.x<p.x)) {
       npos = p;
       next = npc;
       }
-    if(act==ActRight && p.x>pos.x && (next==nullptr || npos.x>p.x)) {
+    if(act==PlayerIntent::ActRight && p.x>pos.x && (next==nullptr || npos.x>p.x)) {
       npos = p;
       next = npc;
       }
@@ -442,8 +442,8 @@ bool PlayerControl::canInteract() const {
 void PlayerControl::clearInput() {
   movement.reset();
   std::memset(ctrl, 0,sizeof(ctrl));
-  std::memset(actrl,0,sizeof(actrl));
-  std::memset(wctrl,0,sizeof(wctrl));
+  intent.clearCombat();
+  intent.clearWeapon();
   }
 
 void PlayerControl::marvinF8(uint64_t dt) {
@@ -529,7 +529,7 @@ bool PlayerControl::tickCameraMove(uint64_t dt) {
   if(camera==nullptr || (pl!=nullptr && !camera->isFree()))
     return false;
 
-  rotMouse = 0;
+  intent.rotMouse = 0;
   if(ctrl[KeyCodec::Left] || (ctrl[KeyCodec::RotateL] && ctrl[KeyCodec::Jump])) {
     camera->moveLeft(dt);
     return true;
@@ -557,8 +557,6 @@ bool PlayerControl::tickMove(uint64_t dt) {
   auto w = Gothic::inst().world();
   if(w==nullptr)
     return false;
-  const float dtF = float(dt)/1000.f;
-
   Npc*  pl     = w->player();
   auto  camera = Gothic::inst().camera();
 
@@ -579,415 +577,45 @@ bool PlayerControl::tickMove(uint64_t dt) {
   if(pl==nullptr)
     return true;
 
-  implMove(dt);
+  updateIntent();
 
-  float runAngle = pl->runAngle();
-  if(runAngle!=0.f || std::fabs(runAngleDest)>0.01f) {
-    const float speed = 35.f;
-    if(runAngle<runAngleDest) {
-      runAngle+=speed*dtF;
-      if(runAngle>runAngleDest)
-        runAngle = runAngleDest;
-      pl->setRunAngle(runAngle);
-      }
-    else if(runAngle>runAngleDest) {
-      runAngle-=speed*dtF;
-      if(runAngle<runAngleDest)
-        runAngle = runAngleDest;
-      pl->setRunAngle(runAngle);
-      }
-    }
+  PlayerMovement::Env env;
+  env.g2Ctrl         = g2Ctrl;
+  env.dialogActive   = dlg.isActive();
+  env.printSpellName = true;
+  env.focus          = currentFocus.interactive;
+  if(camera!=nullptr)
+    env.cameraAzimuth = camera->azimuth();
+  env.moveFocus      = [this](FocusAction act){ moveFocus(act); };
+  mvPlayer.tick(*pl,intent,env,dt);
 
-  rotMouseY = 0;
+  applyIntentFeedback();
+  intent.rotMouseY = 0;
   return true;
   }
 
-void PlayerControl::implMove(uint64_t dt) {
-  auto  w         = Gothic::inst().world();
-  Npc&  pl        = *w->player();
-  float rot       = pl.rotation();
-  float rotY      = pl.rotationY();
-  // 100 / 200 according to some sources, yet my mesures are 90/180
-  float rspeed    = (pl.weaponState()==WeaponState::NoWeapon ? 90.f : 180.f)*(float(dt)/1000.f);
-  auto  ws        = pl.weaponState();
-  auto  bs        = pl.bodyStateMasked();
-  bool  allowRot  = !ctrl[KeyCodec::ActionGeneric] && pl.isRotationAllowed();
-
-  Npc::Anim ani = Npc::Anim::Idle;
-
-  if(bs==BS_DEAD)
-    return;
-  if(bs==BS_UNCONSCIOUS)
-    return;
-
-  if(!pl.isAiQueueEmpty()) {
-    runAngleDest = 0;
-    return;
-    }
-
-  if(pl.interactive()!=nullptr) {
-    runAngleDest = 0;
-    implMoveMobsi(pl,dt);
-    return;
-    }
-
-  if(pl.canSwitchWeapon()) {
-    if(wctrl[WeaponClose]) {
-      wctrl[WeaponClose] = !(pl.closeWeapon(false) || pl.isMonster());
-      return;
-      }
-    if(wctrl[WeaponMele]) {
-      bool ret=false;
-      if(pl.currentMeleeWeapon()!=nullptr)
-        ret = pl.drawWeaponMelee(); else
-        ret = pl.drawWeaponFist();
-      wctrl[WeaponMele] = !ret;
-      wctrlLast         = WeaponMele;
-      if(!wctrl[WeaponMele])
-        return;
-      }
-    if(wctrl[WeaponBow]) {
-      if(pl.currentRangedWeapon()!=nullptr) {
-        wctrl[WeaponBow] = !pl.drawWeaponBow();
-        wctrlLast        = WeaponBow;
-        } else {
-        wctrl[WeaponBow] = false;
-        }
-      if(!wctrl[WeaponBow])
-        return;
-      }
-    for(uint8_t i=0;i<8;++i) {
-      if(wctrl[Weapon3+i]){
-        if(pl.inventory().currentSpell(i)!=nullptr){
-          bool ret = pl.drawMage(uint8_t(3+i));
-          wctrl[Weapon3+i] = !ret;
-          wctrlLast = static_cast<WeaponAction>(Weapon3+i);
-          if(ret) {
-            if(auto spl = pl.inventory().currentSpell(i)) {
-              Gothic::inst().onPrint(spl->description());
-              }
-            }
-          } else {
-          wctrl[Weapon3+i] = false;
-          return;
-          }
-        }
-      }
-    }
-
-  if(!pl.isInState(ScriptFn()) || dlg.isActive()) {
-    runAngleDest = 0;
-    return;
-    }
-
-  int rotation = 0;
-  if(allowRot) {
-    if(this->wantsToTurnLeft()) {
-      rot += rspeed;
-      rotation = -1;
-      rotMouse=0;
-      }
-    if(this->wantsToTurnRight()) {
-      rot -= rspeed;
-      rotation = 1;
-      rotMouse=0;
-      }
-    if(std::fabs(rotMouse)>0.f) {
-      if(rotMouse>0)
-        rotation = -1; else
-        rotation = 1;
-      rot += rotMouse;
-      rotMouse  = 0;
-      }
-    rotY+=rotMouseY;
-    } else {
-    rotMouse  = 0;
-    rotMouseY = 0;
-    }
-
-  pl.setDirectionY(rotY);
-  if(pl.isFalling() || pl.isSlide() || pl.isInAir() || pl.isJump() || pl.isJumpUp()){
-    pl.setDirection(rot);
-    runAngleDest = 0;
-    return;
-    }
-
-  if(casting) {
-    if(!actrl[ActForward] || (Gothic::inst().version().game==1 && pl.attribute(ATR_MANA)==0)) {
-      casting = false;
-      pl.endCastSpell(true);
-      }
-    return;
-    }
-
-  if(ctrl[Action::K_ENTER]) {
-    pl.transformBack();
-    ctrl[Action::K_ENTER] = false;
-    }
-
-  if((ws==WeaponState::Bow || ws==WeaponState::CBow) && pl.hasAmmunition()) {
-    if(actrl[ActGeneric] || actrl[ActForward]) {
-      if(auto other = pl.target()) {
-        auto dp = other->position()-pl.position();
-        pl.turnTo(dp.x,dp.z,true,dt);
-        pl.aimBow();
-        }
-      else if(currentFocus.interactive!=nullptr) {
-        auto dp = currentFocus.interactive->position()-pl.position();
-        pl.turnTo(dp.x,dp.z,false,dt);
-        pl.aimBow();
-        }
-      else {
-        pl.aimBow();
-        }
-
-      if(actrl[ActLeft]) {
-        moveFocus(ActLeft);
-        actrl[ActLeft]  = false;
-        }
-      if(actrl[ActRight]) {
-        moveFocus(ActRight);
-        actrl[ActRight]  = false;
-        }
-      if(!actrl[ActForward])
-        return;
-      }
-    }
-
-  if(ws==WeaponState::Mage) {
-    if(actrl[ActGeneric] || actrl[ActForward] || ctrl[KeyCodec::ActionGeneric]) {
-      if(auto other = pl.target()) {
-        auto dp = other->centerPosition() - pl.centerPosition();
-        pl.turnTo(dp.x,dp.z,true,dt);
-        } else
-      if(currentFocus.interactive!=nullptr) {
-        auto dp = currentFocus.interactive->position()-pl.position();
-        pl.turnTo(dp.x,dp.z,false,dt);
-        }
-
-      if(actrl[ActLeft]) {
-        moveFocus(ActLeft);
-        actrl[ActLeft]  = false;
-        }
-      if(actrl[ActRight]) {
-        moveFocus(ActRight);
-        actrl[ActRight]  = false;
-        }
-      if(!actrl[ActForward]) {
-        pl.setAnim(Npc::Anim::Idle);
-        return;
-        }
-      }
-    }
-
-  if(actrl[ActForward] || actrl[ActMove]) {
-    ctrl [Action::Forward] = actrl[ActMove];
-    actrl[ActMove]         = false;
-    if(ws!=WeaponState::Mage && !(g2Ctrl && (ws==WeaponState::Bow || ws==WeaponState::CBow))) {
-      actrl[ActForward] = false;
-      if(!ctrl[Action::Forward])
-        movement.reset();
-      }
-    switch(ws) {
-      case WeaponState::NoWeapon:
-        break;
-      case WeaponState::Fist:
-        pl.fistShoot();
-        return;
-      case WeaponState::W1H:
-      case WeaponState::W2H: {
-        pl.swingSword();
-        return;
-        }
-      case WeaponState::Bow:
-      case WeaponState::CBow: {
-        pl.shootBow(currentFocus.interactive);
-        return;
-        }
-      case WeaponState::Mage: {
-        casting = (pl.beginCastSpell()==Npc::BC_Invest);
-        if(!casting)
-          actrl[ActForward] = false;
-        return;
-        }
-      }
-    }
-
-  if(actrl[ActKill]) {
-    if((ws==WeaponState::W1H || ws==WeaponState::W2H) && pl.target()!=nullptr && pl.canFinish(*pl.target()))
-      pl.finishingMove();
-    actrl[ActKill] = false;
-    }
-
-  if(actrl[ActLeft] || actrl[ActRight] || actrl[ActBack]) {
-    auto ws = pl.weaponState();
-    if(ws==WeaponState::Fist) {
-      if(actrl[ActBack])
-        pl.blockFist();
-      return;
-      }
-    else if(ws==WeaponState::W1H || ws==WeaponState::W2H) {
-      if(actrl[ActLeft] && pl.swingSwordL()) {
-        movement.strafeRightLeft.reset();
-        }
-      else if(actrl[ActRight] && pl.swingSwordR()) {
-        movement.strafeRightLeft.reset();
-        }
-      else if(actrl[ActBack] && pl.blockSword()) {
-        // movement.forwardBackward.reset();
-        }
-
-      actrl[ActLeft]  = false;
-      actrl[ActRight] = false;
-      // actrl[ActBack]  = false;
-      return;
-      }
-    else if(ws==WeaponState::Mage) {
-      if(actrl[ActLeft]) {
-        moveFocus(ActLeft);
-        actrl[ActLeft]  = false;
-        }
-      if(actrl[ActRight]) {
-        moveFocus(ActRight);
-        actrl[ActRight]  = false;
-        }
-      }
-    }
-
-  if(this->wantsToStrafeLeft()) {
-    ani = Npc::Anim::MoveL;
-    }
-  else if(this->wantsToStrafeRight()) {
-    ani = Npc::Anim::MoveR;
-    }
-  else if(this->wantsToMoveForward()) {
-    if((pl.walkMode()&WalkBit::WM_Dive)!=WalkBit::WM_Dive) {
-      ani = Npc::Anim::Move;
-      }
-    else if(pl.isDive()) {
-      pl.setDirectionY(rotY - rspeed);
-      return;
-      }
-    }
-  else if(this->wantsToMoveBackward()) {
-    if((pl.walkMode()&WalkBit::WM_Dive)!=WalkBit::WM_Dive) {
-      ani = Npc::Anim::MoveBack;
-      } else if(pl.isDive()) {
-      pl.setDirectionY(rotY + rspeed);
-      return;
-      }
-    }
-
-
-  if(ctrl[Action::Jump]) {
-    if(pl.bodyStateMasked()==BS_JUMP) {
-      ani = Npc::Anim::Idle;
-      }
-    else if(pl.isDive()) {
-      ani = Npc::Anim::Move;
-      }
-    else if(pl.isSwim()) {
-      pl.startDive();
-      }
-    else if(pl.isInWater()) {
-      auto& g  = w->script().guildVal();
-      auto  gl = pl.guild();
-
-      if(0<=gl && gl<GIL_MAX && pl.isStanding()) {
-        MoveAlgo::JumpStatus jump;
-        jump.anim   = Npc::Anim::JumpUp;
-        jump.height = float(g.jumpup_height[gl])+pl.position().y;
-        pl.startClimb(jump);
-        }
-      }
-    else if(pl.isStanding()) {
-      auto jump = pl.tryJump();
-      if(!pl.isFalling() && !pl.isSlide() && jump.anim!=Npc::Anim::Jump){
-        pl.startClimb(jump);
-        return;
-        }
-      ani = Npc::Anim::Jump;
-      }
-    else if(!pl.isAttackAnim() && !pl.isCasting()) {
-      ani = Npc::Anim::Jump;
-      }
-    }
-
-  if(!pl.isCasting()) {
-    if(ani==Npc::Anim::Jump) {
-      pl.setAnimRotate(0);
-      rotation = 0;
-      }
-
-    if(pl.isAttackAnim()) {
-      if((ani==Npc::Anim::MoveL || ani==Npc::Anim::MoveR/* || ani==Npc::Anim::MoveBack*/) && pl.hasState(BS_RUN)) {
-        ani = Npc::Anim::Idle;
-        }
-
-      if(!pl.hasState(BS_RUN) && ani==Npc::Anim::Idle) {
-        // charge-run
-        ani = Npc::Anim::NoAnim;
-        }
-      if((ani==Npc::Anim::MoveL || ani==Npc::Anim::MoveR) &&
-          pl.hasState(BS_STAND) && pl.hasState(BS_HIT)) {
-        // no charge to strafe transition
-        ani = Npc::Anim::NoAnim;
-        }
-      }
-
-    if(bs==BS_LIE) {
-      ani = (ani==Npc::Anim::Move) ? Npc::Anim::Idle : Npc::Anim::NoAnim;
-      rot = pl.rotation();
-      }
-
-    if(ani!=Npc::Anim::NoAnim)
-      pl.setAnim(ani);
-    }
-
-  setAnimRotate(pl, rot, ani==Npc::Anim::Idle ? rotation : 0, movement.turnRightLeft.any(), dt);
-  if(actrl[ActGeneric] || ani==Npc::Anim::MoveL || ani==Npc::Anim::MoveR || pl.isFinishingMove()) {
-    processAutoRotate(pl,rot,dt);
-    }
-
-  if(ani==Npc::Anim::Move && (rotation!=0 || rotY!=0)) {
-    assignRunAngle(pl,rot,dt);
-    } else {
-    assignRunAngle(pl,pl.rotation(),dt);
-    }
-  pl.setDirection(rot);
+void PlayerControl::updateIntent() {
+  intent.forward       = movement.forwardBackward.value();
+  intent.strafe        = movement.strafeRightLeft.value();
+  intent.turn          = movement.turnRightLeft.value();
+  intent.actionGeneric = ctrl[Action::ActionGeneric];
+  intent.forwardKey    = ctrl[Action::Forward];
+  intent.backKey       = ctrl[Action::Back];
+  intent.jump          = ctrl[Action::Jump];
+  intent.transformBack = ctrl[Action::K_ENTER];
+  intent.stopMove      = false;
+  intent.stopStrafe    = false;
   }
 
-void PlayerControl::implMoveMobsi(Npc& pl, uint64_t /*dt*/) {
-  // animation handled in MOBSI
-  auto inter = pl.interactive();
-
-  if(ctrl[KeyCodec::Back] && !inter->isLadder()) {
-    pl.setInteraction(nullptr);
-    return;
-    }
-
-  if(inter->needToLockpick(pl) && !inter->isCracked()) {
-    return;
-    }
-
-  if(!inter->isLadder() && inter->isStaticState() && !inter->isDetachState(pl)) {
-    auto stateId = inter->stateId();
-    if(inter->canQuitAtState(pl,stateId))
-      pl.setInteraction(nullptr,false);
-    }
-
-  if(inter->isLadder()) {
-    if(ctrl[KeyCodec::ActionGeneric]) {
-      inter->onKeyInput(KeyCodec::ActionGeneric);
-      ctrl[KeyCodec::ActionGeneric] = false;
-      }
-    else if(ctrl[KeyCodec::Forward]) {
-      inter->onKeyInput(KeyCodec::Forward);
-      }
-    else if(ctrl[KeyCodec::Back]) {
-      inter->onKeyInput(KeyCodec::Back);
-      }
-    }
+void PlayerControl::applyIntentFeedback() {
+  // movement code may consume keys: release them here, so they have to be pressed again
+  ctrl[Action::ActionGeneric] = intent.actionGeneric;
+  ctrl[Action::Forward]       = intent.forwardKey;
+  ctrl[Action::K_ENTER]       = intent.transformBack;
+  if(intent.stopMove)
+    movement.reset();
+  if(intent.stopStrafe)
+    movement.strafeRightLeft.reset();
   }
 
 void PlayerControl::processPickLock(Npc& pl, Interactive& inter, KeyCodec::Action k) {
@@ -1054,53 +682,3 @@ void PlayerControl::quitPicklock(Npc& pl) {
   pl.setInteraction(nullptr);
   }
 
-void PlayerControl::assignRunAngle(Npc& pl, float rotation, uint64_t dt) {
-  float dtF    = (float(dt)/1000.f);
-  auto  camera = Gothic::inst().camera();
-
-  float dest = 0;
-  if(camera!=nullptr && pl.walkMode()==WalkBit::WM_Run && pl.bodyState()==BS_RUN) {
-    const float az   = camera->azimuth();
-    const float maxV = 14.5f;
-    dest = std::min(std::abs(az), maxV)*(az>=0 ? 1 : -1);
-    }
-
-  float a = std::min(dtF*5.f, 1.f);
-  runAngleDest = runAngleDest*(1.f-a)+dest*a;
-  }
-
-void PlayerControl::setAnimRotate(Npc& pl, float rotation, int anim, bool force, uint64_t dt) {
-  float dtF    = (float(dt)/1000.f);
-  float angle  = pl.rotation();
-  float dangle = (rotation-angle)/dtF;
-  auto& wrld   = pl.world();
-
-  if(std::fabs(dangle)<30.f && !force) // 30 deg per second threshold
-    anim = 0;
-  if(anim!=0 && pl.isAttackAnim())
-    anim = 0;
-  if(rotationAni==anim && anim!=0)
-    force = true;
-  if(!force && wrld.tickCount()<turnAniSmooth)
-    return;
-  turnAniSmooth = wrld.tickCount() + 100;
-  rotationAni   = anim;
-  pl.setAnimRotate(anim);
-  }
-
-void PlayerControl::processAutoRotate(Npc& pl, float& rot, uint64_t dt) {
-  if(auto other = pl.target()) {
-    if(pl.weaponState()==WeaponState::NoWeapon || pl.isFinishingMove()){
-      pl.setTarget(nullptr);
-      }
-    else if(!pl.isAttack()) {
-      auto  dp   = other->centerPosition() - pl.centerPosition();
-      auto  gl   = pl.guild();
-      float step = float(pl.world().script().guildVal().turn_speed[gl]);
-      if(actrl[ActGeneric])
-        step*=2.f;
-      pl.rotateTo(dp.x,dp.z,step,AnimationSolver::TurnType::Std,dt);
-      rot = pl.rotation();
-      }
-    }
-  }
