@@ -10,6 +10,7 @@
 #include "game/gametime.h"
 #include "game/perceptionmsg.h"
 #include "game/constants.h"
+#include "net/netentity.h"
 
 class Npc;
 class Item;
@@ -69,6 +70,8 @@ class WorldObjects final {
     void           detectItem(const float x, const float y, const float z, const float r, const std::function<void(Item&)>& f);
 
     uint32_t       npcId(const Npc *ptr) const;
+    auto           netEntities()       -> NetEntityRegistry&       { return netIds; }
+    auto           netEntities() const -> const NetEntityRegistry& { return netIds; }
     size_t         npcCount()    const { return npcArr.size(); }
     const Npc&     npc(size_t i) const { return *npcArr[i];    }
     Npc&           npc(size_t i)       { return *npcArr[i];    }
@@ -183,6 +186,7 @@ class WorldObjects final {
     std::vector<PerceptionMsg>         sndPerc;
     std::vector<TriggerEvent>          triggerEvents;
     CsCamera*                          currentCsCamera = nullptr;
+    NetEntityRegistry                  netIds;
 
     template<class T>
     auto findObj(T &src, const Npc &pl, const SearchOpt& opt) -> typename std::remove_reference<decltype(src[0])>::type;
@@ -194,6 +198,9 @@ class WorldObjects final {
 
     void             setMobState(std::string_view scheme, int32_t st);
     void             passivePerceptionProcess(PerceptionMsg& msg, Npc& npc, Npc& pl);
+
+    void             netRegister(Npc&  npc);
+    void             netRegister(Item& itm);
 
     void             tickNear(uint64_t dt);
     void             tickTriggers(uint64_t dt);

@@ -15,6 +15,7 @@
 #include "utils/workers.h"
 #include "utils/dbgpainter.h"
 #include "gothic.h"
+#include "net/netsession.h"
 
 #include <Tempest/Painter>
 #include <Tempest/Application>
@@ -59,6 +60,9 @@ WorldObjects::SearchOpt::SearchOpt(float rangeMin, float rangeMax, float azi, Ta
 
 WorldObjects::WorldObjects(World& owner):owner(owner){
   npcNear.reserve(512);
+  // only the host of a session hands out network ids; clients bind the ids the host sends
+  auto* session = Gothic::inst().netSession();
+  netIds.setAutoAssign(session!=nullptr && session->isHost());
   }
 
 WorldObjects::~WorldObjects() {
@@ -71,6 +75,7 @@ void WorldObjects::load(Serialize &fin) {
   fin.read(v);
   fin.setVersion(v);
   }
+  netIds.clear();
   itemArr.clear();
   items.clear();
 
@@ -118,6 +123,13 @@ void WorldObjects::load(Serialize &fin) {
     i->postValidate();
   for(auto& i:npcArr)
     i->postValidate();
+
+  for(auto& i:npcArr)
+    netRegister(*i);
+  for(auto& i:npcInvalid)
+    netRegister(*i);
+  for(auto& i:itemArr)
+    netRegister(*i);
   }
 
 void WorldObjects::save(Serialize &fout) {
@@ -303,6 +315,7 @@ Npc* WorldObjects::addNpc(size_t npcInstance, std::string_view at) {
     npc->updateTransform();
     owner.script().invokeRefreshAtInsert(*npc);
     npcArr.emplace_back(npc);
+    netRegister(*npc);
     } else {
     const auto* sym = owner.script().findSymbol(npcInstance);
     Log::e("addNpc: ", npcInstance, " (", (sym!=nullptr ? sym->name() : "nullptr" ), ") has invalid spawnpoint (", at, ")");
@@ -311,6 +324,7 @@ Npc* WorldObjects::addNpc(size_t npcInstance, std::string_view at) {
     npc->setPosition(point.position());
     npc->updateTransform();
     npcInvalid.emplace_back(npc);
+    netRegister(*npc);
     }
 
   return npc;
@@ -329,6 +343,7 @@ Npc* WorldObjects::addNpc(size_t npcInstance, const Vec3& pos) {
   owner.script().invokeRefreshAtInsert(*npc);
 
   npcArr.emplace_back(npc);
+  netRegister(*npc);
   return npc;
   }
 
@@ -350,6 +365,7 @@ Npc* WorldObjects::insertPlayer(std::unique_ptr<Npc> &&npc, std::string_view at)
   npc->attachToPoint(pos);
   npc->updateTransform();
   npcArr.emplace_back(std::move(npc));
+  netRegister(*npcArr.back());
   return npcArr.back().get();
   }
 
@@ -359,6 +375,7 @@ std::unique_ptr<Npc> WorldObjects::takeNpc(const Npc* ptr) {
     if(&npc==ptr){
       auto ret=std::move(npcArr[i]);
       npcArr.erase(npcArr.begin() + int32_t(i));
+      netIds.remove(*ret);
       return ret;
       }
     }
@@ -374,6 +391,16 @@ void WorldObjects::removeNpc(Npc& npc) {
   npc.setPosition(point.position());
   npc.updateTransform();
   npcRemoved.emplace_back(std::move(ptr));
+  }
+
+void WorldObjects::netRegister(Npc& npc) {
+  if(netIds.autoAssign())
+    netIds.add(npc);
+  }
+
+void WorldObjects::netRegister(Item& itm) {
+  if(netIds.autoAssign())
+    netIds.add(itm);
   }
 
 void WorldObjects::tickNear(uint64_t /*dt*/) {
@@ -606,6 +633,7 @@ std::unique_ptr<Item> WorldObjects::takeItem(Item &it) {
       i = std::move(itemArr.back());
       itemArr.pop_back();
       items.del(ret.get());
+      netIds.remove(*ret);
       ret->setPhysicsDisable();
       onItemRemoved(*ret);
       return ret;
@@ -671,6 +699,7 @@ Item* WorldObjects::addItem(size_t itemInstance, const Tempest::Vec3& pos, const
   auto* it=ptr.get();
   itemArr.emplace_back(std::move(ptr));
   items.add(itemArr.back().get());
+  netRegister(*it);
 
   it->setPosition (pos.x, pos.y, pos.z);
   it->setDirection(dir.x, dir.y, dir.z);
@@ -694,6 +723,7 @@ Item* WorldObjects::addItemDyn(size_t itemInstance, const Tempest::Matrix4x4& po
   it->handle().owner = ownerNpc==size_t(-1) ? 0 : int32_t(ownerNpc);
   itemArr.emplace_back(std::move(ptr));
   items.add(itemArr.back().get());
+  netRegister(*it);
 
   it->setObjMatrix(pos);
 
@@ -977,8 +1007,10 @@ void WorldObjects::resetPositionToTA() {
 
   for(auto& i:npcInvalid)
     if(i->handlePtr().use_count()>1)
-      npcArr.push_back(std::move(i)); else
+      npcArr.push_back(std::move(i)); else {
+      netIds.remove(*i);
       npcRemoved.push_back(std::move(i));
+      }
   npcInvalid.clear();
 
   for(auto& i : npcArr) {
