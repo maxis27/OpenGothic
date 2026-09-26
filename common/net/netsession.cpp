@@ -1,5 +1,6 @@
 #include "netsession.h"
 
+#include <algorithm>
 #include <chrono>
 #include <utility>
 
@@ -178,6 +179,49 @@ auto NetSession::takeWorldTime() -> std::optional<int64_t> {
   return std::exchange(worldTime, std::nullopt);
   }
 
+void NetSession::setEntities(std::vector<Entity> list) {
+  if(!server)
+    return;
+  std::sort(list.begin(), list.end(), [](const Entity& a, const Entity& b){ return a.entityId<b.entityId; });
+  // both sorted by id: one walk finds the new, the replaced and the gone ones
+  auto old = entityMap.begin();
+  for(size_t i=0; i<list.size(); ++i) {
+    const Entity& e = list[i];
+    if(e.entityId==0 || e.instance==0 || (i>0 && list[i-1].entityId==e.entityId))
+      continue;
+    while(old!=entityMap.end() && old->first<e.entityId) {
+      sendOthers(NetTransport::InvalidPeer, DespawnEntity{old->first});
+      old = entityMap.erase(old);
+      }
+    if(old!=entityMap.end() && old->first==e.entityId) {
+      const bool same = old->second.kind==e.kind && old->second.instance==e.instance;
+      old->second = e;
+      if(!same)
+        sendOthers(NetTransport::InvalidPeer, e);
+      ++old;
+      continue;
+      }
+    entityMap.emplace_hint(old, e.entityId, e);
+    sendOthers(NetTransport::InvalidPeer, e);
+    }
+  while(old!=entityMap.end()) {
+    sendOthers(NetTransport::InvalidPeer, DespawnEntity{old->first});
+    old = entityMap.erase(old);
+    }
+  }
+
+void NetSession::clearWorld() {
+  players.clear();
+  avatars.clear();
+  states.clear();
+  attacks.clear();
+  hits.clear();
+  respawns.clear();
+  if(!entityMap.empty())
+    ++entityVersion;
+  entityMap.clear();
+  }
+
 void NetSession::forgetPlayer(PlayerId id) {
   players.erase(id);
   avatars.erase(id);
@@ -286,6 +330,8 @@ void NetSession::onHello(NetTransport::PeerId peer, const Hello& hello) {
     }
   if(worldTime)
     send(peer, WorldTime{*worldTime});
+  for(auto& [eid,e]:entityMap)
+    send(peer, e);
   sendOthers(peer, PlayerJoined{id, hello.name});
 
   peers[peer] = id;
@@ -310,12 +356,7 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
         notify("Connection to the host is lost"); else
         notify("Unable to connect to the host");
       st = State::Closed;
-      players.clear();
-      avatars.clear();
-      states.clear();
-      attacks.clear();
-      hits.clear();
-      respawns.clear();
+      clearWorld();
       return;
     case NetTransport::EventType::Receive:
       break;
@@ -328,12 +369,7 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
   if(auto m = std::get_if<Reject>(&*msg)) {
     notify(describe(*m));
     st = State::Closed;
-    players.clear();
-    avatars.clear();
-    states.clear();
-    attacks.clear();
-    hits.clear();
-    respawns.clear();
+    clearWorld();
     return;
     }
   if(auto m = std::get_if<Welcome>(&*msg)) {
@@ -383,6 +419,18 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
   if(auto m = std::get_if<Hit>(&*msg)) {
     if(st==State::Online && hits.size()<MaxPending)
       hits.push_back(*m);
+    return;
+    }
+  if(auto m = std::get_if<SpawnEntity>(&*msg)) {
+    if(st==State::Online) {
+      entityMap[m->entityId] = *m;
+      ++entityVersion;
+      }
+    return;
+    }
+  if(auto m = std::get_if<DespawnEntity>(&*msg)) {
+    if(st==State::Online && entityMap.erase(m->entityId)>0)
+      ++entityVersion;
     return;
     }
   if(auto m = std::get_if<Chat>(&*msg)) {

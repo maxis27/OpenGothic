@@ -2230,7 +2230,8 @@ void Npc::netRespawn(const Vec3& pos, float rotation) {
   }
 
 bool Npc::isNetPlayer() const {
-  return Gothic::inst().isMultiplayer() && (isPlayer() || aiPolicy==NpcProcessPolicy::NetProxy);
+  // not every NetProxy npc: on a client the npcs of the host's world are NetProxy too (MP-19)
+  return Gothic::inst().isMultiplayer() && (isPlayer() || owner.isRemotePlayer(*this));
   }
 
 bool Npc::isNetHit(const Npc& other) {

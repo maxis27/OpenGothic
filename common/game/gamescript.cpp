@@ -1862,6 +1862,8 @@ void GameScript::wld_spawnnpcrange(std::shared_ptr<zenkit::INpc> npcRef, int cls
   (void)lifeTime;
   for(int32_t i=0;i<count;++i) {
     auto* npc = world().addNpc(size_t(clsId),at->position());
+    if(npc==nullptr)
+      return; // a multiplayer client: the host spawns npcs
     fixNpcPosition(*npc,at->rotation() + 360.f*float(i)/float(count),100);
     }
   }

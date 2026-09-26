@@ -19,7 +19,7 @@
 namespace NetProtocol {
 
   // bump on every incompatible change of any message
-  constexpr uint16_t Version = 11;
+  constexpr uint16_t Version = 12;
   // "OGMP", identifies OpenGothic multiplayer traffic
   constexpr uint32_t Magic   = 0x504D474F;
 
@@ -43,6 +43,8 @@ namespace NetProtocol {
     WorldTime    = 9,
     PlayerAttack = 10,
     Hit          = 11,
+    SpawnEntity  = 12,
+    DespawnEntity = 13,
     };
 
   enum class RejectReason : uint8_t {
@@ -191,8 +193,38 @@ namespace NetProtocol {
     int32_t     spell    = -1;  // spell id (C_ITEM::spell) of the spell that hit, -1: none (MP-18)
     };
 
+  // kinds of entities the server spawns in the clients' worlds (items follow with MP-22)
+  enum class EntityKind : uint8_t {
+    Npc = 1,
+    };
+
+  // server -> client, reliable: an entity of the server's world, other than a player's character
+  // (PlayerSpawn), is in the client's world too under network id entityId (MP-19). Clients create no npcs of
+  // their own: they have only the ones the server spawns. Sent when the server's world gets the entity, and to
+  // a newcomer right after Welcome for every entity already there, with what the entity is like then.
+  // An entity id that comes again names a new entity: the client replaces the one it had under that id.
+  struct SpawnEntity {
+    enum Flag : uint8_t {
+      Dead        = 1<<0, // lies dead
+      Unconscious = 1<<1, // lies unconscious; at most one of them
+      AllFlags    = (1<<2)-1,
+      };
+    uint32_t    entityId = 0;   // never 0
+    EntityKind  kind     = EntityKind::Npc;
+    uint32_t    instance = 0;   // script symbol of the instance (C_NPC) the entity is made from, never 0
+    float       x = 0, y = 0, z = 0;
+    float       rotation = 0;   // degrees, Npc::rotation()
+    int32_t     hp       = 0;   // hit points, >= 0
+    uint8_t     flags    = 0;   // Flag
+    };
+
+  // server -> client, reliable: the entity is gone from the server's world, e.g. removed by the scripts
+  struct DespawnEntity {
+    uint32_t    entityId = 0;   // never 0
+    };
+
   using Message = std::variant<Hello,Welcome,Reject,Chat,PlayerJoined,PlayerLeft,PlayerSpawn,PlayerState,WorldTime,
-                               PlayerAttack,Hit>;
+                               PlayerAttack,Hit,SpawnEntity,DespawnEntity>;
 
   std::vector<uint8_t> encode(const Message& msg);
   // Returns nothing for truncated, oversized or unknown packets.

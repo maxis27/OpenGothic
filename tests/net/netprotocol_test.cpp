@@ -151,6 +151,33 @@ void testEncoding() {
   auto cutHit = encode(Hit{17, 21, 1, 1, 0});
   check(!decode(cutHit.data(), cutHit.size()-1), "truncated Hit is refused");
 
+  using Ent = SpawnEntity;
+  auto ent = roundTrip(Ent{21, EntityKind::Npc, 0x1234, 1.5f, -2.f, 3.25f, 270.f, 120, 0}, s);
+  check(ent!=nullptr && ent->entityId==21 && ent->kind==EntityKind::Npc && ent->instance==0x1234 && ent->x==1.5f &&
+        ent->y==-2.f && ent->z==3.25f && ent->rotation==270.f && ent->hp==120 && ent->flags==0, "SpawnEntity round trip");
+  auto deadEnt = roundTrip(Ent{21, EntityKind::Npc, 0x1234, 0, 0, 0, 0, 0, Ent::Dead}, s);
+  check(deadEnt!=nullptr && deadEnt->flags==Ent::Dead && deadEnt->hp==0, "SpawnEntity of a dead npc round trip");
+  auto noIdEnt = encode(Ent{0, EntityKind::Npc, 0x1234});
+  check(!decode(noIdEnt.data(), noIdEnt.size()), "SpawnEntity without entity id is refused");
+  auto noInstEnt = encode(Ent{21, EntityKind::Npc, 0});
+  check(!decode(noInstEnt.data(), noInstEnt.size()), "SpawnEntity without instance is refused");
+  auto badKindEnt = encode(Ent{21, EntityKind(2), 0x1234});
+  check(!decode(badKindEnt.data(), badKindEnt.size()), "SpawnEntity of an unknown kind is refused");
+  auto nanEnt = encode(Ent{21, EntityKind::Npc, 0x1234, std::nanf(""), 0, 0, 0});
+  check(!decode(nanEnt.data(), nanEnt.size()), "SpawnEntity with NaN position is refused");
+  auto negEnt = encode(Ent{21, EntityKind::Npc, 0x1234, 0, 0, 0, 0, -1});
+  check(!decode(negEnt.data(), negEnt.size()), "SpawnEntity with negative hit points is refused");
+  auto bothEnt = encode(Ent{21, EntityKind::Npc, 0x1234, 0, 0, 0, 0, 0, Ent::Dead|Ent::Unconscious});
+  check(!decode(bothEnt.data(), bothEnt.size()), "SpawnEntity both dead and unconscious is refused");
+  auto flagEnt = encode(Ent{21, EntityKind::Npc, 0x1234, 0, 0, 0, 0, 0, 1<<2});
+  check(!decode(flagEnt.data(), flagEnt.size()), "SpawnEntity with unknown flags is refused");
+  auto cutEnt = encode(Ent{21, EntityKind::Npc, 0x1234});
+  check(!decode(cutEnt.data(), cutEnt.size()-1), "truncated SpawnEntity is refused");
+  auto despawn = roundTrip(DespawnEntity{21}, s);
+  check(despawn!=nullptr && despawn->entityId==21, "DespawnEntity round trip");
+  auto noIdDespawn = encode(DespawnEntity{0});
+  check(!decode(noIdDespawn.data(), noIdDespawn.size()), "DespawnEntity without entity id is refused");
+
   // too long strings are cut on encode
   auto longChat = roundTrip(Chat{1, std::string(MaxChatLength+100, 'a')}, s);
   check(longChat!=nullptr && longChat->text.size()==MaxChatLength, "Chat text is limited");
