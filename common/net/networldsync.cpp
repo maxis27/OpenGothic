@@ -1,8 +1,11 @@
 #include "networldsync.h"
 
+#include <Tempest/Application>
 #include <Tempest/Log>
+#include <cmath>
 #include <vector>
 
+#include "graphics/mesh/animationsolver.h"
 #include "world/objects/npc.h"
 #include "world/world.h"
 #include "netsession.h"
@@ -88,16 +91,83 @@ void sendState(NetSession& session, World& world) {
   session.sendPlayerState(s);
   }
 
-// puts the other players' characters where their players have them
-// TODO(MP-11): interpolate between states and play the animation of the state
+// turning speed is measured over this long, ms
+constexpr uint64_t TurnWindow = 100;
+
+// animations of a player's movement which are replayed on its character; the rest (attacks,
+// interactions, items, ...) belongs to the later parts of the synchronization
+bool isMovementAnim(uint16_t a) {
+  using A = AnimationSolver::Anim;
+  switch(a) {
+    case A::Idle:
+    case A::Move:
+    case A::MoveBack:
+    case A::MoveL:
+    case A::MoveR:
+    case A::Fall:
+    case A::FallDeep:
+    case A::Jump:
+    case A::JumpUpLow:
+    case A::JumpUpMid:
+    case A::JumpUp:
+    case A::JumpHang:
+    case A::SlideA:
+    case A::SlideB:
+      return true;
+    }
+  return false;
+  }
+
+// the loops a player keeps setting every frame, see PlayerMovement::implMove;
+// the others play once and are started again only when the state switches to them
+bool isMovementLoop(uint16_t a) {
+  using A = AnimationSolver::Anim;
+  return a==A::Idle || a==A::Move || a==A::MoveBack || a==A::MoveL || a==A::MoveR;
+  }
+
+// plays the animation of the state the character is in, as PlayerMovement does for the local hero
+void applyAnim(World::RemotePlayer& r, const NetSession::PlayerState& s, float turnSpeed) {
+  auto& npc = *r.npc;
+  npc.setWalkMode(WalkBit(s.walkMode));
+
+  if(isMovementAnim(s.anim) && (s.anim!=r.anim || isMovementLoop(s.anim)))
+    npc.setAnim(AnimationSolver::Anim(s.anim));
+  r.anim = s.anim;
+
+  // turning on the spot: 30 degrees per second, like PlayerMovement::setAnimRotate
+  int turn = 0;
+  if(s.anim==AnimationSolver::Anim::Idle && std::fabs(turnSpeed)>=30.f)
+    turn = turnSpeed>0 ? -1 : 1;
+  npc.setAnimRotate(turn);
+  }
+
+// moves the other players' characters along the states received from their players,
+// NetInterpolator::Delay behind, and plays their animations
 void applyStates(NetSession& session, World& world) {
-  auto& ids = world.netEntities();
+  auto&          ids = world.netEntities();
+  const uint64_t now = Application::tickCount();
   for(auto& r:world.remotePlayers()) {
-    auto* s = session.playerState(r.playerId);
-    if(s==nullptr || ids.id(*r.npc)!=NetEntityId{s->entityId})
-      continue; // nothing yet, or the state of a character the host has replaced since
-    r.npc->setPosition(s->x, s->y, s->z);
-    r.npc->setDirection(s->rotation);
+    const NetEntityId id = ids.id(*r.npc);
+    if(auto* s = session.playerState(r.playerId); s!=nullptr && NetEntityId{s->entityId}==id) {
+      if(auto last = r.motion.newest(); last!=nullptr && last->entityId!=s->entityId)
+        r.motion.clear(); // the host has replaced the character: forget the old one's way
+      r.motion.push(*s, now); // the same state again is ignored
+      }
+
+    NetInterpolator::Sample cur, before;
+    if(!r.motion.sample(now, cur) || NetEntityId{cur.state->entityId}!=id)
+      continue; // nothing yet, or the states of a character the host has replaced since
+    r.motion.sample(now-TurnWindow, before);
+
+    float turn = std::fmod(cur.rotation-before.rotation, 360.f);
+    if(turn>180.f)
+      turn -= 360.f;
+    if(turn<-180.f)
+      turn += 360.f;
+
+    r.npc->setPosition(cur.x, cur.y, cur.z);
+    r.npc->setDirection(cur.rotation);
+    applyAnim(r, *cur.state, turn*1000.f/float(TurnWindow));
     }
   }
 

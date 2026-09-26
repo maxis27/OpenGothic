@@ -9,7 +9,7 @@ class World;
 //  - client: takes the ids over from the host: its own hero gets its id, the other players'
 //    characters are spawned where the host has them;
 //  - every player sends the state of its own character (NetSession::sendPlayerState) and
-//    moves the other players' characters to the latest state received for them;
+//    plays back the states received for the other players' characters (NetInterpolator);
 //  - characters of players who left are removed, all of them once the session is gone.
 // Called every frame. A newly loaded world has no remote players yet and is filled again.
 namespace NetWorldSync {
