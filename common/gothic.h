@@ -98,6 +98,8 @@ class Gothic final {
 
     // multiplayer session, started by -host/-connect; nullptr in singleplayer
     NetSession*  netSession() { return net.get(); }
+    // free-roam multiplayer has no story: saving, dialogs, cutscenes and videos are off
+    bool         isMultiplayer() const { return net!=nullptr; }
     // service the multiplayer session; called every frame
     void         tickNetwork();
 

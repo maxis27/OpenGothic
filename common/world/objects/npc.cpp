@@ -2769,6 +2769,9 @@ void Npc::nextAiAction(AiQueue& queue, uint64_t dt) {
 
       if(act.target==nullptr)
         break;
+      // no dialogs in multiplayer, also the ones npcs start on their own
+      if(Gothic::inst().isMultiplayer())
+        break;
 
       if(owner.isInDialog()) {
         queue.pushFront(std::move(act));
@@ -4188,6 +4191,8 @@ void Npc::setPerceptionDisable(PercType t) {
 
 void Npc::startDialog(Npc& pl) {
   if(pl.isDown() || pl.isInAir() || isPlayer())
+    return;
+  if(Gothic::inst().isMultiplayer())
     return;
   if(perceptionProcess(pl,nullptr,0,PERC_ASSESSTALK))
     setOther(&pl);

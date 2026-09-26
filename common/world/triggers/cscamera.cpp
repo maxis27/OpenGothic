@@ -153,6 +153,8 @@ void CsCamera::debugDraw(DbgPainter& p) const {
 void CsCamera::onTrigger(const TriggerEvent& evt) {
   if(hasTicksEnabled() || posSpline.size()==0)
     return;
+  if(Gothic::inst().isMultiplayer())
+    return;
 
   if(auto cs = world.currentCs())
     cs->onUntrigger(evt);

@@ -670,6 +670,10 @@ void Gothic::quickLoad() {
   }
 
 void Gothic::save(std::string_view slot, std::string_view name) {
+  if(isMultiplayer()) {
+    onPrint("Saving is disabled in multiplayer");
+    return;
+    }
   onSaveGame(slot,name);
   }
 
@@ -1099,11 +1103,15 @@ void Gothic::introducechapter(std::string_view title, std::string_view subtitle,
   }
 
 bool Gothic::playvideo(std::string_view name) {
+  if(isMultiplayer())
+    return true;
   onVideo(name);
   return true;
   }
 
 bool Gothic::playvideoex(std::string_view name, bool, bool) {
+  if(isMultiplayer())
+    return true;
   onVideo(name);
   return true;
   }
