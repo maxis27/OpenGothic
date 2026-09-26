@@ -244,11 +244,11 @@ std::optional<Message> readPlayerAttack(Reader& r) {
   PlayerAttack m;
   uint8_t      move = 0;
   if(!r.u32(m.playerId) || !r.u32(m.entityId) || m.entityId==0 || !r.u32(m.time) || !r.u32(m.target) ||
-     !r.u8(move) || move<uint8_t(AttackMove::Swing) || move>uint8_t(AttackMove::Cast) ||
+     !r.u8(move) || move<uint8_t(AttackMove::Swing) || move>uint8_t(AttackMove::Release) ||
      !r.f32(m.dx) || !r.f32(m.dy) || !r.f32(m.dz) || !r.u32(m.spell) || !r.u8(m.level) || !r.atEnd())
     return std::nullopt;
   m.move = AttackMove(move);
-  const bool spell = m.move==AttackMove::Invest || m.move==AttackMove::Cast;
+  const bool spell = m.move==AttackMove::Invest || m.move==AttackMove::Release || m.move==AttackMove::Cast;
   if(spell!=(m.spell!=0))
     return std::nullopt;
   if(m.move==AttackMove::Cast ? (m.level<1 || m.level>MaxSpellLevel) : m.level!=0)

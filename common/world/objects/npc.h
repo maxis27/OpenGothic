@@ -178,15 +178,17 @@ class Npc final {
     // of the last one and the network id of its target (0: none), for multiplayer; the target is
     // taken when the attack starts, the focus may be lost right after (finishing moves).
     // A shot is Anim::Attack with a bow or crossbow drawn; lastShot is the initial velocity of its arrow.
-    // Spells count too (beginCastSpell charging one, commitSpell casting it): lastCast is the rune or scroll
-    // (0: the last attack wasn't a spell), lastCastLevel 0 while charging, the level cast at 1..16;
-    // lastShot is the velocity of the spell's projectile, if it has one
+    // Spells count too (beginCastSpell charging one, tickCast starting its cast animation, commitSpell
+    // emitting it): lastCast is the rune or scroll (0: the last attack wasn't a spell), lastCastLevel 0
+    // before the spell is emitted, the level cast at 1..16 then; lastCastRelease is true for the start of
+    // the cast animation; lastShot is the velocity of the spell's projectile, if it has one
     uint32_t   attackCount()      const { return attacksStarted;    }
     Anim       lastAttack()       const { return lastAttackStarted; }
     uint32_t   lastAttackTarget() const { return lastAttackTargetId; }
     auto       lastShot()         const -> const Tempest::Vec3& { return lastShotDir; }
     size_t     lastCast()         const { return lastCastItem;  }
     uint8_t    lastCastLevel()    const { return lastCastLvl;   }
+    bool       lastCastReleased() const { return lastCastRelease; }
     auto       setAnimAngGet(Anim a) -> const Animation::Sequence*;
     auto       setAnimAngGet(Anim a, uint8_t comb) -> const Animation::Sequence*;
     void       setAnimRotate(int rot);
@@ -298,11 +300,13 @@ class Npc final {
     // or along dir (the arrow's velocity) without one; the arrow is given for the shot, the character
     // has none (items belong to MP-22)
     bool      netShoot(const Npc* target, const Tempest::Vec3& dir);
-    // multiplayer: the character of another player charges or casts the spell its player did (MP-18), with
-    // the rune or scroll spellItem, which it is given if it has none. The cast emits the spell at level:
-    // its projectile at target, or along dir without one, its other effect on target or on the caster.
-    // The spell's scripts aren't run: mana, summons, transformations stay the player's own
+    // multiplayer: the character of another player charges a spell, plays its cast animation or emits it,
+    // as its player did (MP-18), with the rune or scroll spellItem, which it is given if it has none.
+    // The cast emits the spell at level: its projectile at target, or along dir without one, its other
+    // effect on target or on the caster. The spell's scripts aren't run: mana, summons, transformations
+    // stay the player's own
     bool      netInvestSpell(size_t spellItem);
+    bool      netReleaseSpell(size_t spellItem);
     bool      netCastSpell(size_t spellItem, int32_t level, Npc* target, const Tempest::Vec3& dir);
     bool      hasAmmunition() const;
 
@@ -612,6 +616,7 @@ class Npc final {
     Tempest::Vec3                  lastShotDir             ={};
     size_t                         lastCastItem            =0;
     uint8_t                        lastCastLvl             =0;
+    bool                           lastCastRelease         =false;
     int32_t                        trGuild                 =GIL_NONE;
     int32_t                        talentsSk[TALENT_MAX_G2]={};
     int32_t                        talentsVl[TALENT_MAX_G2]={};

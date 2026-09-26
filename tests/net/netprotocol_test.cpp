@@ -110,6 +110,11 @@ void testEncoding() {
   auto invest = roundTrip(PlayerAttack{3, 17, 555, 21, AttackMove::Invest, 0, 0, 0, 0x2345}, s);
   check(invest!=nullptr && invest->move==AttackMove::Invest && invest->spell==0x2345 && invest->level==0,
         "PlayerAttack invest round trip");
+  auto release = roundTrip(PlayerAttack{3, 17, 666, 21, AttackMove::Release, 0, 0, 0, 0x2345}, s);
+  check(release!=nullptr && release->move==AttackMove::Release && release->spell==0x2345 && release->level==0,
+        "PlayerAttack release round trip");
+  auto noSpellRelease = encode(PlayerAttack{3, 17, 1, 0, AttackMove::Release});
+  check(!decode(noSpellRelease.data(), noSpellRelease.size()), "PlayerAttack release without spell is refused");
   auto cast = roundTrip(PlayerAttack{3, 17, 777, 0, AttackMove::Cast, 0.5f, -0.5f, 3.f, 0x2345, 4}, s);
   check(cast!=nullptr && cast->move==AttackMove::Cast && cast->spell==0x2345 && cast->level==4 &&
         cast->dx==0.5f && cast->dy==-0.5f && cast->dz==3.f, "PlayerAttack cast round trip");
@@ -121,7 +126,7 @@ void testEncoding() {
   check(!decode(noLevelCast.data(), noLevelCast.size()), "PlayerAttack cast without level is refused");
   auto highLevelCast = encode(PlayerAttack{3, 17, 1, 0, AttackMove::Cast, 0, 0, 0, 0x2345, uint8_t(MaxSpellLevel+1)});
   check(!decode(highLevelCast.data(), highLevelCast.size()), "PlayerAttack cast above the highest level is refused");
-  auto badMove = encode(PlayerAttack{3, 17, 1, 0, AttackMove(9)});
+  auto badMove = encode(PlayerAttack{3, 17, 1, 0, AttackMove(10)});
   check(!decode(badMove.data(), badMove.size()), "PlayerAttack with unknown move is refused");
   auto cutAttack = encode(PlayerAttack{3, 17, 1, 0, AttackMove::Finish});
   check(!decode(cutAttack.data(), cutAttack.size()-1), "truncated PlayerAttack is refused");

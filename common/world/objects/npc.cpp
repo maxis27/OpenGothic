@@ -3352,6 +3352,7 @@ void Npc::commitSpell() {
   lastShotDir        = b!=nullptr ? b->direction() : Vec3();
   lastCastItem       = active->clsId();
   lastCastLvl        = uint8_t(std::clamp(lvl,1,int(CS_Emit_Last-CS_Emit_0)+1));
+  lastCastRelease    = false;
 
   if(active->isSpell()) {
     size_t cnt = active->count();
@@ -4086,6 +4087,7 @@ Npc::BeginCastResult Npc::beginCastSpell() {
       lastShotDir        = {};
       lastCastItem       = active->clsId();
       lastCastLvl        = 0;
+      lastCastRelease    = false;
       return BeginCastResult::BC_Invest;
       }
     case SPL_SENDCAST: {
@@ -4129,6 +4131,14 @@ bool Npc::tickCast(uint64_t dt) {
       if(g2 || visual.hasAnim(string_frm("T_MAGRUN_2_",ani,"CAST")))
         if(!visual.startAnimSpell(*this,ani,false))
           return true;
+
+      ++attacksStarted;
+      lastAttackStarted  = Anim::NoAnim;
+      lastAttackTargetId = currentTarget!=nullptr ? owner.netEntities().id(*currentTarget).value : 0;
+      lastShotDir        = {};
+      lastCastItem       = active->clsId();
+      lastCastLvl        = 0;
+      lastCastRelease    = true;
       }
     castLevel    = CastState(int(castLevel) + int(CS_Emit_0) - int(CS_Cast_0));
     castNextTime = 0;
@@ -4313,6 +4323,16 @@ bool Npc::netInvestSpell(size_t spellItem) {
   return visual.startAnimSpell(*this,owner.script().spellCastAnim(*this,*itm),true)!=nullptr;
   }
 
+bool Npc::netReleaseSpell(size_t spellItem) {
+  auto itm = invent.getItem(spellItem);
+  if(itm==nullptr)
+    itm = addItem(spellItem,1);
+  if(itm==nullptr || !itm->isSpellOrRune() || weaponState()!=WeaponState::Mage)
+    return false;
+  visual.setAnimRotate(*this,0);
+  return visual.startAnimSpell(*this,owner.script().spellCastAnim(*this,*itm),false)!=nullptr;
+  }
+
 bool Npc::netCastSpell(size_t spellItem, int32_t level, Npc* target, const Vec3& dir) {
   auto itm = invent.getItem(spellItem);
   if(itm==nullptr)
@@ -4320,13 +4340,9 @@ bool Npc::netCastSpell(size_t spellItem, int32_t level, Npc* target, const Vec3&
   if(itm==nullptr || !itm->isSpellOrRune())
     return false;
 
-  // the spell is emitted also when the animation is refused (e.g. the spell isn't drawn here yet): on the host
+  // the animation has been played by netReleaseSpell, as the player's was, before the spell is emitted;
+  // it is emitted also when the animation was refused (e.g. the spell isn't drawn here yet): on the host
   // it deals the damage the player's spell has dealt in the player's world
-  if(weaponState()==WeaponState::Mage) {
-    visual.setAnimRotate(*this,0);
-    visual.startAnimSpell(*this,owner.script().spellCastAnim(*this,*itm),false);
-    }
-
   auto b = emitSpell(*itm,std::clamp(level,1,int(CS_Emit_Last-CS_Emit_0)+1),target);
   if(b!=nullptr && target==nullptr && dir!=Vec3())
     b->setDirection(dir*(DynamicWorld::spellSpeed/dir.length()));
