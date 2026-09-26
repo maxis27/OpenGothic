@@ -18,6 +18,19 @@ using namespace Tempest;
 
 namespace {
 
+// true, if symbol is an item instance of the scripts (C_ITEM), which the other player's weapon should be;
+// both sides run the same scripts, so their symbol numbers are the same
+bool isItemInstance(World& world, uint32_t symbol) {
+  auto& sc  = world.script();
+  auto* sym = sc.findSymbol(symbol);
+  if(sym==nullptr || sym->type()!=zenkit::DaedalusDataType::INSTANCE || sym->address()==0)
+    return false;
+  const zenkit::DaedalusSymbol* cls = sym;
+  while(cls!=nullptr && cls->parent()!=uint32_t(-1))
+    cls = sc.findSymbol(cls->parent());
+  return cls!=nullptr && cls!=sym && cls->name()=="C_ITEM";
+  }
+
 // gives npc the network id from the host; false when it's taken by another object
 bool bindId(NetEntityRegistry& ids, Npc& npc, NetEntityId id) {
   if(ids.id(npc)==id)
@@ -141,13 +154,19 @@ void sendState(NetSession& session, World& world) {
     s.meleeWeapon = uint32_t(it->clsId());
   if(auto it = pl.currentRangedWeapon())
     s.rangedWeapon = uint32_t(it->clsId());
+  if(auto it = pl.inventory().activeWeapon(); it!=nullptr && pl.weaponState()==WeaponState::Mage)
+    s.spell = uint32_t(it->clsId());
   session.sendPlayerState(s);
   }
 
-// the move of an attack animation started by a character, see Npc::lastAttack
-std::optional<NetProtocol::AttackMove> attackMove(AnimationSolver::Anim a, WeaponState ws) {
+// the move of the last attack started by a character, see Npc::lastAttack and Npc::lastCast
+std::optional<NetProtocol::AttackMove> attackMove(const Npc& npc) {
   using A = AnimationSolver::Anim;
   using M = NetProtocol::AttackMove;
+  if(npc.lastCast()!=0)
+    return npc.lastCastLevel()==0 ? M::Invest : M::Cast;
+  const auto a  = npc.lastAttack();
+  const auto ws = npc.weaponState();
   if(ws==WeaponState::Bow || ws==WeaponState::CBow)
     return a==A::Attack ? std::optional(M::Shoot) : std::nullopt;
   switch(a) {
@@ -178,17 +197,21 @@ void sendAttacks(NetSession& session, World& world) {
 
   auto&             ids = world.netEntities();
   const NetEntityId id  = ids.id(pl);
-  const auto        mv  = attackMove(pl.lastAttack(), pl.weaponState());
+  const auto        mv  = attackMove(pl);
   if(!id || !mv)
     return;
   NetSession::PlayerAttack a;
   a.entityId = id.value;
   a.move     = *mv;
   a.target   = pl.lastAttackTarget();
-  if(a.move==NetProtocol::AttackMove::Shoot) {
+  if(a.move==NetProtocol::AttackMove::Shoot || a.move==NetProtocol::AttackMove::Cast) {
     a.dx = pl.lastShot().x;
     a.dy = pl.lastShot().y;
     a.dz = pl.lastShot().z;
+    }
+  if(a.move==NetProtocol::AttackMove::Invest || a.move==NetProtocol::AttackMove::Cast) {
+    a.spell = uint32_t(pl.lastCast());
+    a.level = pl.lastCastLevel();
     }
   session.sendAttack(a);
   }
@@ -225,6 +248,18 @@ void replayAttack(World& world, Npc& npc, const NetSession::PlayerAttack& a) {
       Log::i("multiplayer: shot of ", npc.displayName(), " missed: no bow or crossbow equipped");
     return;
     }
+  if(a.move==M::Invest || a.move==M::Cast) {
+    if(!isItemInstance(world, a.spell)) {
+      Log::e("multiplayer: unknown spell ", a.spell, " of ", npc.displayName());
+      return;
+      }
+    // like a shot: the spell is cast even if it isn't drawn here yet, only the charging waits for it
+    if(a.move==M::Invest)
+      npc.netInvestSpell(a.spell);
+    else if(!npc.netCastSpell(a.spell, a.level, target, Vec3(a.dx, a.dy, a.dz)))
+      Log::e("multiplayer: spell ", a.spell, " of ", npc.displayName(), " is not a rune or scroll");
+    return;
+    }
 
   const auto ws = npc.weaponState();
   if(ws!=WeaponState::Fist && ws!=WeaponState::W1H && ws!=WeaponState::W2H)
@@ -259,6 +294,8 @@ void replayAttack(World& world, Npc& npc, const NetSession::PlayerAttack& a) {
         }
       break;
     case M::Shoot:
+    case M::Invest:
+    case M::Cast:
       break;
     }
   }
@@ -332,9 +369,11 @@ void applyAnim(World::RemotePlayer& r, const NetSession::PlayerState& s, float t
   auto& npc = *r.npc;
   npc.setWalkMode(WalkBit(s.walkMode));
 
-  // standing still doesn't cut a blow short, like in PlayerMovement::implMove
-  const bool blow = s.anim==AnimationSolver::Anim::Idle && npc.isAttackAnim();
-  if(isMovementAnim(s.anim) && (s.anim!=r.anim || isMovementLoop(s.anim)) && !blow)
+  // standing still doesn't cut a blow short, like in PlayerMovement::implMove; while the player charges or
+  // casts a spell (animations started by the spell, not by setAnim) its character keeps the spell's animation
+  const bool blow    = s.anim==AnimationSolver::Anim::Idle && npc.isAttackAnim();
+  const bool casting = BodyState(s.bodyState & BS_MAX)==BS_CASTING;
+  if(isMovementAnim(s.anim) && (s.anim!=r.anim || isMovementLoop(s.anim)) && !blow && !casting)
     npc.setAnim(AnimationSolver::Anim(s.anim));
   r.anim = s.anim;
 
@@ -343,19 +382,6 @@ void applyAnim(World::RemotePlayer& r, const NetSession::PlayerState& s, float t
   if(s.anim==AnimationSolver::Anim::Idle && std::fabs(turnSpeed)>=30.f)
     turn = turnSpeed>0 ? -1 : 1;
   npc.setAnimRotate(turn);
-  }
-
-// true, if symbol is an item instance of the scripts (C_ITEM), which the other player's weapon should be;
-// both sides run the same scripts, so their symbol numbers are the same
-bool isItemInstance(World& world, uint32_t symbol) {
-  auto& sc  = world.script();
-  auto* sym = sc.findSymbol(symbol);
-  if(sym==nullptr || sym->type()!=zenkit::DaedalusDataType::INSTANCE || sym->address()==0)
-    return false;
-  const zenkit::DaedalusSymbol* cls = sym;
-  while(cls!=nullptr && cls->parent()!=uint32_t(-1))
-    cls = sc.findSymbol(cls->parent());
-  return cls!=nullptr && cls!=sym && cls->name()=="C_ITEM";
   }
 
 // gives npc the weapon of the other player in place of the one it has in the slot
@@ -391,12 +417,22 @@ void applyEquipment(World& world, World::RemotePlayer& r, const NetSession::Play
                 ws==WeaponState::Bow || ws==WeaponState::CBow, "ranged weapon");
     r.ranged = s.rangedWeapon;
     }
+  if(s.spell!=r.spell) {
+    // the rune or scroll is given to the character to draw it; runes and scrolls it no longer holds are
+    // kept (items belong to MP-22)
+    if(s.spell!=0 && !isItemInstance(world, s.spell))
+      Log::e("multiplayer: unknown spell ", s.spell, " of ", npc.displayName());
+    else if(s.spell!=0 && npc.getItem(s.spell)==nullptr)
+      npc.addItem(s.spell, 1);
+    r.spell = s.spell;
+    }
   }
 
 // draws or puts away the weapon as the other player did; a switch can take a few frames (put the old
 // weapon away, then draw the new one), and waits while the character can't switch, so it is repeated
-// until the character is in the state. Spells (Mage) belong to MP-18
-void applyWeapon(Npc& npc, WeaponState want) {
+// until the character is in the state. A spell is drawn when the character has its rune or scroll
+// (applyEquipment)
+void applyWeapon(Npc& npc, WeaponState want, uint32_t spell) {
   const auto cur   = npc.weaponState();
   const bool melee = cur==WeaponState::W1H || cur==WeaponState::W2H;
   const bool bow   = cur==WeaponState::Bow || cur==WeaponState::CBow;
@@ -423,8 +459,16 @@ void applyWeapon(Npc& npc, WeaponState want) {
       if(!bow && npc.currentRangedWeapon()!=nullptr)
         npc.drawWeaponBow();
       break;
-    case WeaponState::Mage:
+    case WeaponState::Mage: {
+      auto* active = npc.inventory().activeWeapon();
+      auto* it     = spell!=0 ? npc.getItem(spell) : nullptr;
+      if(it==nullptr || !it->isSpellOrRune())
+        break;
+      if(cur==WeaponState::Mage && active!=nullptr && active->clsId()==spell)
+        break;
+      npc.drawSpell(it->spellId()); // puts another weapon away first, over a few frames
       break;
+      }
     }
   }
 
@@ -479,7 +523,7 @@ void applyStates(NetSession& session, World& world) {
       continue;
       }
     applyEquipment(world, r, *cur.state);
-    applyWeapon(*r.npc, WeaponState(cur.state->weaponState));
+    applyWeapon(*r.npc, WeaponState(cur.state->weaponState), cur.state->spell);
     applyAnim(r, *cur.state, turn*1000.f/float(TurnWindow));
 
     // attacks at the moment of the player's movement they were started in, with its weapon drawn

@@ -114,6 +114,8 @@ class GameScript final {
     size_t                      symbolsCount() const;
 
     const AiState&              aiState  (ScriptFn id);
+    // true for the ids spellDesc/spellVfx know, e.g. a spell id received over the network
+    bool                        isSpellId(int32_t splId) const;
     const zenkit::ISpell&       spellDesc(int32_t splId);
     const VisualFx*             spellVfx (int32_t splId);
 

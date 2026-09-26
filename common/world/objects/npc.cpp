@@ -2100,7 +2100,7 @@ void Npc::takeDamage(Npc& other, const Bullet* b, const CollideMask bMask, int32
 
   if(isDown()) {
     onNoHealth(dontKill,HS_NoSound);
-    reportNetHit(other,hpBefore,netFlags);
+    reportNetHit(other,hpBefore,netFlags,isSpell ? splId : -1);
     return;
     }
 
@@ -2147,7 +2147,7 @@ void Npc::takeDamage(Npc& other, const Bullet* b, const CollideMask bMask, int32
         }
       }
     }
-  reportNetHit(other,hpBefore,netFlags);
+  reportNetHit(other,hpBefore,netFlags,isSpell ? splId : -1);
   }
 
 void Npc::takeNetHit(Npc* other, const NetProtocol::Hit& hit) {
@@ -2163,6 +2163,12 @@ void Npc::takeNetHit(Npc* other, const NetProtocol::Hit& hit) {
 
   if(other!=nullptr && (hit.flags & NetHit::Effect))
     owner.addWeaponHitEffect(*other,nullptr,*this).play();
+
+  // what the spell does where it hits (burning, ...), as Npc::takeDamage does in the host's world
+  if(other!=nullptr && hit.spell>=0 && owner.script().isSpellId(hit.spell)) {
+    lastHitSpell = hit.spell;
+    Effect::onCollide(owner,owner.script().spellVfx(hit.spell),position(),this,other,hit.spell);
+    }
 
   if((hit.flags & NetHit::Stumble) && !isDown() && interactive()==nullptr) {
     lastHitType = (hit.flags & NetHit::StumbleB) ? 'B' : 'A';
@@ -2232,7 +2238,7 @@ bool Npc::isNetHit(const Npc& other) {
   return Gothic::inst().isNetClient() && ids.id(*this) && ids.id(other);
   }
 
-void Npc::reportNetHit(Npc& other, int32_t hpBefore, uint8_t flags) {
+void Npc::reportNetHit(Npc& other, int32_t hpBefore, uint8_t flags, int32_t splId) {
   auto&             ids = owner.netEntities();
   const NetEntityId id  = ids.id(*this);
   if(!id || Gothic::inst().isNetClient())
@@ -2247,6 +2253,7 @@ void Npc::reportNetHit(Npc& other, int32_t hpBefore, uint8_t flags) {
   hit.hp       = std::max(attribute(ATR_HITPOINTS),0);
   hit.damage   = std::max(hpBefore-hit.hp,0);
   hit.flags    = flags;
+  hit.spell    = splId;
   owner.addNetHit(hit);
   }
 
@@ -3291,47 +3298,60 @@ bool Npc::isTargetableBySpell(TargetType t) const {
   return false;
   }
 
-void Npc::commitSpell() {
-  auto active = invent.getItem(currentSpellCast);
-  if(active==nullptr || !active->isSpellOrRune())
-    return;
-
-  const int32_t splId = active->spellId();
+Bullet* Npc::emitSpell(Item& active, int32_t lvl, Npc* target) {
+  const int32_t splId = active.spellId();
   const auto&   spl   = owner.script().spellDesc(splId);
 
-  if(owner.version().game==2)
-    owner.script().invokeSpell(*this,currentTarget,*active);
-
-  if(active->isSpellShoot()) {
-    const int lvl = (castLevel-CS_Emit_0)+1;
+  if(active.isSpellShoot()) {
     DamageCalculator::Damage dmg={};
     for(size_t i=0; i<zenkit::DamageType::NUM; ++i)
       if((spl.damage_type&(1<<i))!=0) {
         dmg[i] = spl.damage_per_level*lvl;
         }
 
-    auto& b = owner.shootSpell(*active, *this, currentTarget);
+    auto& b = owner.shootSpell(active, *this, target);
     b.setDamage(dmg);
     b.setOrigin(this);
     b.setTarget(nullptr);
     visual.setMagicWeaponKey(owner,SpellFxKey::Init);
-    } else {
-    // NOTE: use pfx_ppsIsLoopingChg ?
-    const VisualFx* vfx = owner.script().spellVfx(splId);
-    if(vfx!=nullptr) {
-      auto e = Effect(*vfx,owner,Vec3(x,y,z),SpellFxKey::Cast);
-      e.setOrigin(this);
-      e.setTarget((currentTarget==nullptr) ? this : currentTarget);
-      e.setSpellId(splId,owner);
-      e.setActive(true);
-      visual.startEffect(owner,std::move(e),0,true);
-      }
-    visual.setMagicWeaponKey(owner,SpellFxKey::Init);
-    if(currentTarget!=nullptr) {
-      currentTarget->lastHitSpell = splId;
-      currentTarget->perceptionProcess(*this,nullptr,0,PERC_ASSESSMAGIC);
-      }
+    return &b;
     }
+
+  // NOTE: use pfx_ppsIsLoopingChg ?
+  const VisualFx* vfx = owner.script().spellVfx(splId);
+  if(vfx!=nullptr) {
+    auto e = Effect(*vfx,owner,Vec3(x,y,z),SpellFxKey::Cast);
+    e.setOrigin(this);
+    e.setTarget((target==nullptr) ? this : target);
+    e.setSpellId(splId,owner);
+    e.setActive(true);
+    visual.startEffect(owner,std::move(e),0,true);
+    }
+  visual.setMagicWeaponKey(owner,SpellFxKey::Init);
+  if(target!=nullptr) {
+    target->lastHitSpell = splId;
+    target->perceptionProcess(*this,nullptr,0,PERC_ASSESSMAGIC);
+    }
+  return nullptr;
+  }
+
+void Npc::commitSpell() {
+  auto active = invent.getItem(currentSpellCast);
+  if(active==nullptr || !active->isSpellOrRune())
+    return;
+
+  if(owner.version().game==2)
+    owner.script().invokeSpell(*this,currentTarget,*active);
+
+  const int lvl = (castLevel-CS_Emit_0)+1;
+  auto*     b   = emitSpell(*active,lvl,currentTarget);
+
+  ++attacksStarted;
+  lastAttackStarted  = Anim::NoAnim;
+  lastAttackTargetId = currentTarget!=nullptr ? owner.netEntities().id(*currentTarget).value : 0;
+  lastShotDir        = b!=nullptr ? b->direction() : Vec3();
+  lastCastItem       = active->clsId();
+  lastCastLvl        = uint8_t(std::clamp(lvl,1,int(CS_Emit_Last-CS_Emit_0)+1));
 
   if(active->isSpell()) {
     size_t cnt = active->count();
@@ -3942,6 +3962,7 @@ bool Npc::doAttack(Anim anim, BodyState bs) {
     lastAttackStarted = anim;
     lastAttackTargetId = currentTarget!=nullptr ? owner.netEntities().id(*currentTarget).value : 0;
     lastShotDir       = {};
+    lastCastItem      = 0;
     // implAniWait(uint64_t(sq->atkTotalTime(visual.comboLength())+1));
     return true;
     }
@@ -3966,6 +3987,7 @@ bool Npc::blockFist() {
     lastAttackStarted = Anim::AttackBlock;
     lastAttackTargetId = currentTarget!=nullptr ? owner.netEntities().id(*currentTarget).value : 0;
     lastShotDir       = {};
+    lastCastItem      = 0;
     }
   return true;
   }
@@ -4057,6 +4079,13 @@ Npc::BeginCastResult Npc::beginCastSpell() {
       if(!visual.startAnimSpell(*this,ani,true))
         Log::d("Couldn't start animation for spell '",currentSpellCast,"'");
       castLevel = CS_Invest_0;
+
+      ++attacksStarted;
+      lastAttackStarted  = Anim::NoAnim;
+      lastAttackTargetId = currentTarget!=nullptr ? owner.netEntities().id(*currentTarget).value : 0;
+      lastShotDir        = {};
+      lastCastItem       = active->clsId();
+      lastCastLvl        = 0;
       return BeginCastResult::BC_Invest;
       }
     case SPL_SENDCAST: {
@@ -4243,6 +4272,7 @@ bool Npc::shootBow(Interactive* focOverride) {
   lastAttackStarted  = Anim::Attack;
   lastAttackTargetId = currentTarget!=nullptr ? owner.netEntities().id(*currentTarget).value : 0;
   lastShotDir        = b.direction();
+  lastCastItem       = 0;
   return true;
   }
 
@@ -4270,6 +4300,36 @@ bool Npc::netShoot(const Npc* target, const Vec3& dir) {
     b.setDirection(dir*(DynamicWorld::bulletSpeed/dir.length()));
   invent.delItem(munition,1,*this);
   initBullet(b);
+  return true;
+  }
+
+bool Npc::netInvestSpell(size_t spellItem) {
+  auto itm = invent.getItem(spellItem);
+  if(itm==nullptr)
+    itm = addItem(spellItem,1);
+  if(itm==nullptr || !itm->isSpellOrRune() || weaponState()!=WeaponState::Mage)
+    return false;
+  visual.setAnimRotate(*this,0);
+  return visual.startAnimSpell(*this,owner.script().spellCastAnim(*this,*itm),true)!=nullptr;
+  }
+
+bool Npc::netCastSpell(size_t spellItem, int32_t level, Npc* target, const Vec3& dir) {
+  auto itm = invent.getItem(spellItem);
+  if(itm==nullptr)
+    itm = addItem(spellItem,1); // a scroll the character has used up, or never had (items belong to MP-22)
+  if(itm==nullptr || !itm->isSpellOrRune())
+    return false;
+
+  // the spell is emitted also when the animation is refused (e.g. the spell isn't drawn here yet): on the host
+  // it deals the damage the player's spell has dealt in the player's world
+  if(weaponState()==WeaponState::Mage) {
+    visual.setAnimRotate(*this,0);
+    visual.startAnimSpell(*this,owner.script().spellCastAnim(*this,*itm),false);
+    }
+
+  auto b = emitSpell(*itm,std::clamp(level,1,int(CS_Emit_Last-CS_Emit_0)+1),target);
+  if(b!=nullptr && target==nullptr && dir!=Vec3())
+    b->setDirection(dir*(DynamicWorld::spellSpeed/dir.length()));
   return true;
   }
 

@@ -121,6 +121,7 @@ class World final {
       uint16_t        anim     = 0;    // AnimationSolver::Anim of the last state played back
       uint32_t        melee    = uint32_t(-1); // weapons of the last state equipped on npc, -1: none yet
       uint32_t        ranged   = uint32_t(-1);
+      uint32_t        spell    = uint32_t(-1); // rune or scroll of the last state given to npc, -1: none yet
       std::deque<NetProtocol::PlayerAttack> attacks; // received, waiting for the playback of motion to reach them
       bool            unconscious = false; // the player's own character was unconscious in the last state played back
       };

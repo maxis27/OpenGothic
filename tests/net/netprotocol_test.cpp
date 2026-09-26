@@ -76,11 +76,11 @@ void testEncoding() {
   auto noIdSpawn = encode(PlayerSpawn{4, 0, 0, 0, 0, 0});
   check(!decode(noIdSpawn.data(), noIdSpawn.size()), "PlayerSpawn without entity id is refused");
 
-  auto state = roundTrip(PlayerState{4, 17, 0xFFFFFFF0u, 123456, -1.f, 2.5f, 3e5f, 90.f, 0x18003, 2, 1, 3, 0xABCD, 0xFFFFFFFFu}, s);
+  auto state = roundTrip(PlayerState{4, 17, 0xFFFFFFF0u, 123456, -1.f, 2.5f, 3e5f, 90.f, 0x18003, 2, 1, 3, 0xABCD, 0xFFFFFFFFu, 0x1234}, s);
   check(state!=nullptr && state->playerId==4 && state->entityId==17 && state->seq==0xFFFFFFF0u &&
         state->time==123456 && state->x==-1.f && state->y==2.5f && state->z==3e5f && state->rotation==90.f &&
         state->bodyState==0x18003 && state->anim==2 && state->walkMode==1 && state->weaponState==3 &&
-        state->meleeWeapon==0xABCD && state->rangedWeapon==0xFFFFFFFFu,
+        state->meleeWeapon==0xABCD && state->rangedWeapon==0xFFFFFFFFu && state->spell==0x1234,
         "PlayerState round trip");
   auto infState = encode(PlayerState{4, 17, 1, 0, 0, 0, 0, std::numeric_limits<float>::infinity()});
   check(!decode(infState.data(), infState.size()), "PlayerState with infinite rotation is refused");
@@ -107,7 +107,21 @@ void testEncoding() {
         shot->dx==2.5f && shot->dy==0.25f && shot->dz==-1.5f, "PlayerAttack shot round trip");
   auto nanShot = encode(PlayerAttack{3, 17, 1, 0, AttackMove::Shoot, std::nanf(""), 0, 0});
   check(!decode(nanShot.data(), nanShot.size()), "PlayerAttack shot with NaN direction is refused");
-  auto badMove = encode(PlayerAttack{3, 17, 1, 0, AttackMove(7)});
+  auto invest = roundTrip(PlayerAttack{3, 17, 555, 21, AttackMove::Invest, 0, 0, 0, 0x2345}, s);
+  check(invest!=nullptr && invest->move==AttackMove::Invest && invest->spell==0x2345 && invest->level==0,
+        "PlayerAttack invest round trip");
+  auto cast = roundTrip(PlayerAttack{3, 17, 777, 0, AttackMove::Cast, 0.5f, -0.5f, 3.f, 0x2345, 4}, s);
+  check(cast!=nullptr && cast->move==AttackMove::Cast && cast->spell==0x2345 && cast->level==4 &&
+        cast->dx==0.5f && cast->dy==-0.5f && cast->dz==3.f, "PlayerAttack cast round trip");
+  auto noSpellCast = encode(PlayerAttack{3, 17, 1, 0, AttackMove::Cast, 0, 0, 0, 0, 1});
+  check(!decode(noSpellCast.data(), noSpellCast.size()), "PlayerAttack cast without spell is refused");
+  auto spellSwing = encode(PlayerAttack{3, 17, 1, 0, AttackMove::Swing, 0, 0, 0, 0x2345});
+  check(!decode(spellSwing.data(), spellSwing.size()), "PlayerAttack swing with spell is refused");
+  auto noLevelCast = encode(PlayerAttack{3, 17, 1, 0, AttackMove::Cast, 0, 0, 0, 0x2345, 0});
+  check(!decode(noLevelCast.data(), noLevelCast.size()), "PlayerAttack cast without level is refused");
+  auto highLevelCast = encode(PlayerAttack{3, 17, 1, 0, AttackMove::Cast, 0, 0, 0, 0x2345, uint8_t(MaxSpellLevel+1)});
+  check(!decode(highLevelCast.data(), highLevelCast.size()), "PlayerAttack cast above the highest level is refused");
+  auto badMove = encode(PlayerAttack{3, 17, 1, 0, AttackMove(9)});
   check(!decode(badMove.data(), badMove.size()), "PlayerAttack with unknown move is refused");
   auto cutAttack = encode(PlayerAttack{3, 17, 1, 0, AttackMove::Finish});
   check(!decode(cutAttack.data(), cutAttack.size()-1), "truncated PlayerAttack is refused");
@@ -123,6 +137,12 @@ void testEncoding() {
   check(dead!=nullptr && dead->hp==0 && dead->flags==(Hit::Effect|Hit::Dead), "Hit felling the target round trip");
   auto badFlags = encode(Hit{17, 21, 0, 1, Hit::Dead|Hit::Unconscious});
   check(!decode(badFlags.data(), badFlags.size()), "Hit leaving the target both dead and unconscious is refused");
+  auto noSpellHit = roundTrip(Hit{17, 21, 1, 1, 0}, s);
+  check(noSpellHit!=nullptr && noSpellHit->spell==-1, "Hit without spell round trip");
+  auto spellHit = roundTrip(Hit{17, 21, 40, 60, Hit::Scream, 0}, s);
+  check(spellHit!=nullptr && spellHit->spell==0 && spellHit->damage==60, "Hit by a spell round trip");
+  auto badSpellHit = encode(Hit{17, 21, 40, 60, 0, -2});
+  check(!decode(badSpellHit.data(), badSpellHit.size()), "Hit with invalid spell is refused");
   auto cutHit = encode(Hit{17, 21, 1, 1, 0});
   check(!decode(cutHit.data(), cutHit.size()-1), "truncated Hit is refused");
 
