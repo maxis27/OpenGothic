@@ -399,13 +399,17 @@ void applyWeapon(Npc& npc, WeaponState want) {
 // one gets up again once its player's has. Death is undone only by the host's respawn.
 // Returns false while the character is down.
 bool applyDown(World::RemotePlayer& r, const NetSession::PlayerState& s) {
+  using A = AnimationSolver::Anim;
   auto&      npc  = *r.npc;
   const auto bs   = BodyState(s.bodyState & BS_MAX);
+  // the pose keeps BS_UNCONSCIOUS until the animation of getting up is over; the player is up
+  // as soon as it starts (AI_StandUp: setAnim(Idle)), so its character gets up along with it
+  const bool lies = s.anim==A::UnconsciousA || s.anim==A::UnconsciousB;
   const bool was  = r.unconscious;
-  r.unconscious   = bs==BS_UNCONSCIOUS;
+  r.unconscious   = bs==BS_UNCONSCIOUS && lies;
   if(bs==BS_DEAD)
     npc.netDown(true);
-  else if(bs==BS_UNCONSCIOUS)
+  else if(r.unconscious)
     npc.netDown(false);
   else if(was)
     npc.netStandUp(); // not merely a state from before the host's hit felled it: the player got up
