@@ -2525,6 +2525,10 @@ void GameScript::npc_sendsingleperc(std::shared_ptr<zenkit::INpc> npcRef, std::s
   }
 
 bool GameScript::npc_checkinfo(std::shared_ptr<zenkit::INpc> npcRef, int imp) {
+  // no dialogs in multiplayer: without this npcs with an important info keep walking up to
+  // the player and turning it to face them (ZS_Talk), but the talk never happens
+  if(Gothic::inst().isMultiplayer())
+    return false;
   auto n    = findNpc(npcRef);
   auto hero = findNpc(vm.global_other());
   if(n==nullptr || hero==nullptr)
