@@ -53,7 +53,11 @@ class NetSession final {
     // Host: the character of a player in the session is in the world. The clients are told
     // when it is new or has another entity id than before; newcomers get all of them right
     // after Welcome. Ignored on a client and for players not in the session.
+    // A respawned character (MP-16) is set with Avatar::Respawn and a new entity id.
     void     setAvatar(const Avatar& a);
+    // Client: the characters the host has respawned since the last call (Avatar::Respawn), oldest first;
+    // avatar() already has them.
+    auto     takeRespawns() -> std::vector<Avatar>;
 
     // Movement of the players' characters. Every player moves its own character and sends
     // its state; the host relays the states of each player to the others.
@@ -138,6 +142,7 @@ class NetSession final {
     uint64_t                                         stateSent = 0;
     std::vector<PlayerAttack>                        attacks;
     std::vector<Hit>                                 hits;
+    std::vector<Avatar>                              respawns;
     // host: last time of its world set and last one sent (with when); client: the host's time not taken yet
     std::optional<int64_t>                           worldTime;
     std::optional<int64_t>                           worldTimeSent;

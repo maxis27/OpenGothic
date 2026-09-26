@@ -113,6 +113,7 @@ void write(Writer& w, const PlayerSpawn& m) {
   w.f32(m.y);
   w.f32(m.z);
   w.f32(m.rotation);
+  w.u8 (m.flags);
   }
 
 void write(Writer& w, const PlayerState& m) {
@@ -209,7 +210,8 @@ std::optional<Message> readPlayerLeft(Reader& r) {
 std::optional<Message> readPlayerSpawn(Reader& r) {
   PlayerSpawn m;
   if(!r.u32(m.playerId) || !r.u32(m.entityId) || m.entityId==0 ||
-     !r.f32(m.x) || !r.f32(m.y) || !r.f32(m.z) || !r.f32(m.rotation) || !r.atEnd())
+     !r.f32(m.x) || !r.f32(m.y) || !r.f32(m.z) || !r.f32(m.rotation) ||
+     !r.u8(m.flags) || (m.flags & ~PlayerSpawn::AllFlags)!=0 || !r.atEnd())
     return std::nullopt;
   return m;
   }
@@ -246,6 +248,8 @@ std::optional<Message> readHit(Reader& r) {
   uint32_t hp = 0, damage = 0;
   if(!r.u32(m.attacker) || !r.u32(m.target) || m.target==0 || !r.u32(hp) || !r.u32(damage) ||
      !r.u8(m.flags) || (m.flags & ~Hit::AllFlags)!=0 || !r.atEnd())
+    return std::nullopt;
+  if((m.flags & Hit::Dead) && (m.flags & Hit::Unconscious))
     return std::nullopt;
   m.hp     = int32_t(hp);
   m.damage = int32_t(damage);

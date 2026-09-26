@@ -3,6 +3,7 @@
 #include <Tempest/Application>
 #include <Tempest/Log>
 #include <cmath>
+#include <map>
 #include <optional>
 #include <vector>
 
@@ -27,6 +28,25 @@ bool bindId(NetEntityRegistry& ids, Npc& npc, NetEntityId id) {
   return ids.bind(id, npc);
   }
 
+// host: true when the character of player pid has been dead for RespawnDelayMs
+bool isRespawnDue(uint32_t pid, const Npc& npc) {
+  static std::map<uint32_t,uint64_t> deadSince;
+  const uint64_t now = Application::tickCount();
+  if(!npc.isDead()) {
+    deadSince.erase(pid);
+    return false;
+    }
+  auto it = deadSince.find(pid);
+  if(it==deadSince.end()) {
+    deadSince[pid] = now;
+    return false;
+    }
+  if(now-it->second<NetWorldSync::RespawnDelayMs)
+    return false;
+  deadSince.erase(it);
+  return true;
+  }
+
 void tickHost(NetSession& session, World& world) {
   auto& ids = world.netEntities();
   for(auto& [pid,name]:session.playerList()) {
@@ -43,8 +63,21 @@ void tickHost(NetSession& session, World& world) {
     NetEntityId id = ids.id(*npc);
     if(!id)
       id = ids.add(*npc);
+    uint8_t flags = 0;
+    if(isRespawnDue(pid, *npc)) {
+      // back at the start point as a new entity: what is still under way for the dead one
+      // (its states, attacks) no longer applies to it
+      auto& start = world.startPoint();
+      npc->netRespawn(start.groundPos, npc->rotation());
+      npc->setDirection(start.direction());
+      npc->updateTransform();
+      ids.remove(*npc);
+      id    = ids.add(*npc);
+      flags = NetSession::Avatar::Respawn;
+      Log::i("multiplayer: ", name, " is back to life");
+      }
     const auto pos = npc->position();
-    session.setAvatar({pid, id.value, pos.x, pos.y, pos.z, npc->rotation()});
+    session.setAvatar({pid, id.value, pos.x, pos.y, pos.z, npc->rotation(), flags});
     }
   }
 
@@ -71,6 +104,14 @@ void tickClient(NetSession& session, World& world) {
       }
     if(!bindId(ids, *npc, id))
       Log::e("multiplayer: network id ", id.value, " of ", name, " is taken");
+    }
+
+  // characters the host has brought back to life, the local hero too
+  for(auto& a:session.takeRespawns()) {
+    Npc* npc = a.playerId==session.playerId() ? world.player() : world.remotePlayer(a.playerId);
+    if(npc==nullptr || ids.id(*npc)!=NetEntityId{a.entityId})
+      continue; // not in this world, or respawned once more since
+    npc->netRespawn(Vec3(a.x, a.y, a.z), a.rotation);
     }
   }
 
@@ -353,6 +394,24 @@ void applyWeapon(Npc& npc, WeaponState want) {
     }
   }
 
+// the character falls as its player's did, when the host's Hit hasn't felled it already, e.g. when
+// only the player's own world has hurt it (a fall, drowning, npcs of its own until MP-19); an unconscious
+// one gets up again once its player's has. Death is undone only by the host's respawn.
+// Returns false while the character is down.
+bool applyDown(World::RemotePlayer& r, const NetSession::PlayerState& s) {
+  auto&      npc  = *r.npc;
+  const auto bs   = BodyState(s.bodyState & BS_MAX);
+  const bool was  = r.unconscious;
+  r.unconscious   = bs==BS_UNCONSCIOUS;
+  if(bs==BS_DEAD)
+    npc.netDown(true);
+  else if(bs==BS_UNCONSCIOUS)
+    npc.netDown(false);
+  else if(was)
+    npc.netStandUp(); // not merely a state from before the host's hit felled it: the player got up
+  return !npc.isDown();
+  }
+
 // moves the other players' characters along the states received from their players,
 // NetInterpolator::Delay behind, and plays their animations
 void applyStates(NetSession& session, World& world) {
@@ -381,6 +440,10 @@ void applyStates(NetSession& session, World& world) {
 
     r.npc->setPosition(cur.x, cur.y, cur.z);
     r.npc->setDirection(cur.rotation);
+    if(!applyDown(r, *cur.state)) {
+      r.attacks.clear(); // blows the character was about to deal before it fell
+      continue;
+      }
     applyEquipment(world, r, *cur.state);
     applyWeapon(*r.npc, WeaponState(cur.state->weaponState));
     applyAnim(r, *cur.state, turn*1000.f/float(TurnWindow));

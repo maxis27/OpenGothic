@@ -419,6 +419,14 @@ class Npc final {
     void      takeDamage(Npc& other, const Bullet* b, const VisualFx* vfx, int32_t splId);
     // multiplayer client: a hit the host has dealt to this character, see NetWorldSync
     void      takeNetHit(Npc* other, const NetProtocol::Hit& hit);
+    // multiplayer: the character is down as its player or the host says (MP-16); a dead one stays dead
+    void      netDown(bool death, Npc* other = nullptr);
+    // multiplayer: an unconscious character of another player gets up, as its player's did
+    void      netStandUp();
+    // multiplayer: a dead player's character is back to life at pos, with full hit points
+    void      netRespawn(const Tempest::Vec3& pos, float rotation);
+    // multiplayer: the character of a player (the local hero or another player's), not an npc
+    bool      isNetPlayer() const;
     bool      isTargetableBySpell(TargetType t) const;
 
     void      emitSoundEffect(std::string_view sound, float range, bool freeSlot);

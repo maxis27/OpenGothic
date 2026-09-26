@@ -122,6 +122,7 @@ class World final {
       uint32_t        melee    = uint32_t(-1); // weapons of the last state equipped on npc, -1: none yet
       uint32_t        ranged   = uint32_t(-1);
       std::deque<NetProtocol::PlayerAttack> attacks; // received, waiting for the playback of motion to reach them
+      bool            unconscious = false; // the player's own character was unconscious in the last state played back
       };
     auto                 remotePlayers() const -> const std::vector<RemotePlayer>& { return remotePl; }
     auto                 remotePlayers()       -> std::vector<RemotePlayer>&       { return remotePl; }
