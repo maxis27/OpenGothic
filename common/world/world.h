@@ -3,6 +3,7 @@
 #include <Tempest/VertexBuffer>
 #include <Tempest/IndexBuffer>
 #include <Tempest/Matrix4x4>
+#include <deque>
 #include <string>
 #include <functional>
 
@@ -120,6 +121,7 @@ class World final {
       uint16_t        anim     = 0;    // AnimationSolver::Anim of the last state played back
       uint32_t        melee    = uint32_t(-1); // weapons of the last state equipped on npc, -1: none yet
       uint32_t        ranged   = uint32_t(-1);
+      std::deque<NetProtocol::PlayerAttack> attacks; // received, waiting for the playback of motion to reach them
       };
     auto                 remotePlayers() const -> const std::vector<RemotePlayer>& { return remotePl; }
     auto                 remotePlayers()       -> std::vector<RemotePlayer>&       { return remotePl; }
@@ -128,6 +130,11 @@ class World final {
     Npc*                 addRemotePlayer(uint32_t playerId, std::string_view name, const Tempest::Vec3& pos, float rotation);
     void                 removeRemotePlayer(uint32_t playerId);
     auto                 netEntities() -> NetEntityRegistry& { return wobj.netEntities(); }
+    // Hits on characters with a network id (Npc::reportNetHit), for the multiplayer host to send
+    // to the clients; kept until taken, at most MaxNetHits of them.
+    static constexpr size_t MaxNetHits = 256;
+    void                 addNetHit(const NetProtocol::Hit& hit);
+    auto                 takeNetHits() -> std::vector<NetProtocol::Hit>;
     Npc*                 findNpcByInstance(size_t instance, size_t n = 0);
     Item*                findItemByInstance(size_t instance, size_t n = 0);
     std::string_view     roomAt(const Tempest::Vec3& arr);
@@ -233,6 +240,7 @@ class World final {
 
     Npc*                                  npcPlayer=nullptr;
     std::vector<RemotePlayer>             remotePl;
+    std::vector<NetProtocol::Hit>         netHits;
 
     std::unique_ptr<DynamicWorld>         wdynamic;
     std::unique_ptr<WorldView>            wview;

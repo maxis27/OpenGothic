@@ -31,6 +31,9 @@ class NetInterpolator final {
     void push(const State& s, uint64_t now);
     // The character at local time now, shifted by Delay; false while nothing was pushed.
     bool sample(uint64_t now, Sample& out) const;
+    // The moment played back at local time now, on the sender's clock (PlayerState::time):
+    // an event the sender stamped with a time up to this is due. False while nothing was pushed.
+    bool playbackTime(uint64_t now, int64_t& out) const;
     void clear();
 
     bool   empty() const { return states.empty(); }

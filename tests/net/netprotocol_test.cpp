@@ -93,6 +93,28 @@ void testEncoding() {
   auto cutTime = encode(WorldTime{1});
   check(!decode(cutTime.data(), cutTime.size()-1), "truncated WorldTime is refused");
 
+  auto attack = roundTrip(PlayerAttack{3, 17, 98765, 21, AttackMove::SwingLeft}, s);
+  check(attack!=nullptr && attack->playerId==3 && attack->entityId==17 && attack->time==98765 &&
+        attack->target==21 && attack->move==AttackMove::SwingLeft, "PlayerAttack round trip");
+  auto noIdAttack = encode(PlayerAttack{3, 0, 1, 0, AttackMove::Swing});
+  check(!decode(noIdAttack.data(), noIdAttack.size()), "PlayerAttack without entity id is refused");
+  auto badMove = encode(PlayerAttack{3, 17, 1, 0, AttackMove(6)});
+  check(!decode(badMove.data(), badMove.size()), "PlayerAttack with unknown move is refused");
+  auto cutAttack = encode(PlayerAttack{3, 17, 1, 0, AttackMove::Finish});
+  check(!decode(cutAttack.data(), cutAttack.size()-1), "truncated PlayerAttack is refused");
+
+  auto hit = roundTrip(Hit{17, 21, 115, 45, Hit::Effect|Hit::Stumble|Hit::DontKill}, s);
+  check(hit!=nullptr && hit->attacker==17 && hit->target==21 && hit->hp==115 && hit->damage==45 &&
+        hit->flags==(Hit::Effect|Hit::Stumble|Hit::DontKill), "Hit round trip");
+  auto noTargetHit = encode(Hit{17, 0, 1, 1, 0});
+  check(!decode(noTargetHit.data(), noTargetHit.size()), "Hit without target is refused");
+  auto negHit = encode(Hit{17, 21, -5, 1, 0});
+  check(!decode(negHit.data(), negHit.size()), "Hit with negative hit points is refused");
+  auto badFlags = encode(Hit{17, 21, 1, 1, 0x80});
+  check(!decode(badFlags.data(), badFlags.size()), "Hit with unknown flags is refused");
+  auto cutHit = encode(Hit{17, 21, 1, 1, 0});
+  check(!decode(cutHit.data(), cutHit.size()-1), "truncated Hit is refused");
+
   // too long strings are cut on encode
   auto longChat = roundTrip(Chat{1, std::string(MaxChatLength+100, 'a')}, s);
   check(longChat!=nullptr && longChat->text.size()==MaxChatLength, "Chat text is limited");

@@ -669,6 +669,10 @@ void Gothic::quickLoad() {
   load("save_slot_0.sav");
   }
 
+bool Gothic::isNetClient() const {
+  return net!=nullptr && !net->isHost();
+  }
+
 void Gothic::save(std::string_view slot, std::string_view name) {
   if(isMultiplayer()) {
     onPrint("Saving is disabled in multiplayer");

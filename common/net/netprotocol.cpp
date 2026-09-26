@@ -138,6 +138,24 @@ void write(Writer& w, const WorldTime& m) {
   w.u64(uint64_t(m.time));
   }
 
+void write(Writer& w, const PlayerAttack& m) {
+  w.u8 (uint8_t(MsgType::PlayerAttack));
+  w.u32(m.playerId);
+  w.u32(m.entityId);
+  w.u32(m.time);
+  w.u32(m.target);
+  w.u8 (uint8_t(m.move));
+  }
+
+void write(Writer& w, const Hit& m) {
+  w.u8 (uint8_t(MsgType::Hit));
+  w.u32(m.attacker);
+  w.u32(m.target);
+  w.u32(uint32_t(m.hp));
+  w.u32(uint32_t(m.damage));
+  w.u8 (m.flags);
+  }
+
 std::optional<Message> readHello(Reader& r) {
   Hello    m;
   uint32_t magic = 0;
@@ -213,6 +231,29 @@ std::optional<Message> readWorldTime(Reader& r) {
   return WorldTime{int64_t(time)};
   }
 
+std::optional<Message> readPlayerAttack(Reader& r) {
+  PlayerAttack m;
+  uint8_t      move = 0;
+  if(!r.u32(m.playerId) || !r.u32(m.entityId) || m.entityId==0 || !r.u32(m.time) || !r.u32(m.target) ||
+     !r.u8(move) || move<uint8_t(AttackMove::Swing) || move>uint8_t(AttackMove::Finish) || !r.atEnd())
+    return std::nullopt;
+  m.move = AttackMove(move);
+  return m;
+  }
+
+std::optional<Message> readHit(Reader& r) {
+  Hit      m;
+  uint32_t hp = 0, damage = 0;
+  if(!r.u32(m.attacker) || !r.u32(m.target) || m.target==0 || !r.u32(hp) || !r.u32(damage) ||
+     !r.u8(m.flags) || (m.flags & ~Hit::AllFlags)!=0 || !r.atEnd())
+    return std::nullopt;
+  m.hp     = int32_t(hp);
+  m.damage = int32_t(damage);
+  if(m.hp<0 || m.damage<0)
+    return std::nullopt;
+  return m;
+  }
+
 bool isValidName(const std::string& name) {
   if(name.empty() || name.size()>MaxNameLength)
     return false;
@@ -245,6 +286,8 @@ std::optional<Message> NetProtocol::decode(const uint8_t* data, size_t size) {
     case MsgType::PlayerSpawn:  return readPlayerSpawn(r);
     case MsgType::PlayerState:  return readPlayerState(r);
     case MsgType::WorldTime:    return readWorldTime(r);
+    case MsgType::PlayerAttack: return readPlayerAttack(r);
+    case MsgType::Hit:          return readHit(r);
     }
   return std::nullopt;
   }

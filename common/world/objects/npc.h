@@ -19,6 +19,8 @@
 
 #include <zenkit/addon/daedalus.hh>
 
+namespace NetProtocol { struct Hit; }
+
 class Interactive;
 class WayPoint;
 
@@ -172,6 +174,10 @@ class Npc final {
     bool       setAnim(Anim a);
     // last animation started through setAnim/setAnimAngGet, for multiplayer
     Anim       lastAnim() const { return lastAnimStarted; }
+    // melee attacks and parades started (doAttack, blockFist): how many so far and the animation
+    // of the last one, for multiplayer
+    uint32_t   attackCount() const { return attacksStarted;    }
+    Anim       lastAttack()  const { return lastAttackStarted; }
     auto       setAnimAngGet(Anim a) -> const Animation::Sequence*;
     auto       setAnimAngGet(Anim a, uint8_t comb) -> const Animation::Sequence*;
     void       setAnimRotate(int rot);
@@ -411,6 +417,8 @@ class Npc final {
     void      commitSpell();
     void      takeDamage(Npc& other, const Bullet* b);
     void      takeDamage(Npc& other, const Bullet* b, const VisualFx* vfx, int32_t splId);
+    // multiplayer client: a hit the host has dealt to this character, see NetWorldSync
+    void      takeNetHit(Npc* other, const NetProtocol::Hit& hit);
     bool      isTargetableBySpell(TargetType t) const;
 
     void      emitSoundEffect(std::string_view sound, float range, bool freeSlot);
@@ -522,6 +530,11 @@ class Npc final {
     void      takeDamage(Npc& other, const Bullet* b, const CollideMask bMask, int32_t splId, bool isSpell);
     void      takeFallDamage(const Tempest::Vec3& fallSpeed);
     void      takeDrownDamage();
+    // multiplayer client: between characters with a network id only the host deals damage;
+    // the ones only this client has (npcs until MP-19) still hurt locally
+    bool      isNetHit(const Npc& other);
+    // multiplayer host: a hit on this character, for the clients (World::addNetHit)
+    void      reportNetHit(Npc& other, int32_t hpBefore, uint8_t flags);
 
     void      dropTorch(bool burnout = false);
 
@@ -563,6 +576,8 @@ class Npc final {
 
     WalkBit                        wlkMode                 =WalkBit::WM_Run;
     Anim                           lastAnimStarted         =Anim::NoAnim;
+    uint32_t                       attacksStarted          =0;
+    Anim                           lastAttackStarted       =Anim::NoAnim;
     int32_t                        trGuild                 =GIL_NONE;
     int32_t                        talentsSk[TALENT_MAX_G2]={};
     int32_t                        talentsVl[TALENT_MAX_G2]={};

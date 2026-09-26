@@ -17,6 +17,7 @@
 #include "utils/dbgpainter.h"
 #include "camera.h"
 #include "gothic.h"
+#include "net/netprotocol.h"
 #include "resources.h"
 
 using namespace Tempest;
@@ -2017,7 +2018,7 @@ void Npc::commitDamage() {
   }
 
 void Npc::takeDamage(Npc &other, const Bullet* b) {
-  if(isDown())
+  if(isDown() || isNetHit(other))
     return;
 
   assert(b==nullptr || !b->isSpell());
@@ -2037,11 +2038,12 @@ void Npc::takeDamage(Npc &other, const Bullet* b) {
     } else {
     if(invent.activeWeapon()!=nullptr)
       visual.emitBlockEffect(*this,other);
+    reportNetHit(other,attribute(ATR_HITPOINTS),NetProtocol::Hit::Blocked);
     }
   }
 
 void Npc::takeDamage(Npc& other, const Bullet* b, const VisualFx* vfx, int32_t splId) {
-  if(isDown())
+  if(isDown() || isNetHit(other))
     return;
 
   lastHitSpell = splId;
@@ -2083,12 +2085,19 @@ void Npc::takeDamage(Npc& other, const Bullet* b, const CollideMask bMask, int32
     implFaiWait(0);
     }
 
+  using NetHit = NetProtocol::Hit;
+  const int32_t hpBefore = attribute(ATR_HITPOINTS);
+  uint8_t       netFlags = dontKill ? uint8_t(NetHit::DontKill) : uint8_t(0);
+
   hitResult = DamageCalculator::damageValue(other,*this,b,isSpell,dmg,bMask);
-  if(!isSpell && !isDown() && hitResult.hasHit)
+  if(!isSpell && !isDown() && hitResult.hasHit) {
     owner.addWeaponHitEffect(other,b,*this).play();
+    netFlags |= uint8_t(NetHit::Effect);
+    }
 
   if(isDown()) {
     onNoHealth(dontKill,HS_NoSound);
+    reportNetHit(other,hpBefore,netFlags);
     return;
     }
 
@@ -2103,8 +2112,10 @@ void Npc::takeDamage(Npc& other, const Bullet* b, const CollideMask bMask, int32
         visual.interrupt(); // TODO: put down in pipeline, at Pose and merge with setAnimAngGet
         }
 
-      if((damageType & (1<<zenkit::DamageType::FLY))==0)
+      if((damageType & (1<<zenkit::DamageType::FLY))==0) {
         setAnimAngGet(lastHitType=='A' ? Anim::StumbleA  : Anim::StumbleB);
+        netFlags |= uint8_t(lastHitType=='A' ? NetHit::Stumble : NetHit::Stumble|NetHit::StumbleB);
+        }
       }
     }
 
@@ -2128,10 +2139,63 @@ void Npc::takeDamage(Npc& other, const Bullet* b, const CollideMask bMask, int32
       else {
         if(owner.script().rand(2)==0) {
           emitSoundSVM("SVM_%d_AARGH");
+          netFlags |= uint8_t(NetHit::Scream);
           }
         }
       }
     }
+  reportNetHit(other,hpBefore,netFlags);
+  }
+
+void Npc::takeNetHit(Npc* other, const NetProtocol::Hit& hit) {
+  using NetHit = NetProtocol::Hit;
+  if(other!=nullptr)
+    lastHit = other;
+
+  if(hit.flags & NetHit::Blocked) {
+    if(other!=nullptr && invent.activeWeapon()!=nullptr)
+      visual.emitBlockEffect(*this,*other);
+    return;
+    }
+
+  if(other!=nullptr && (hit.flags & NetHit::Effect))
+    owner.addWeaponHitEffect(*other,nullptr,*this).play();
+
+  if((hit.flags & NetHit::Stumble) && !isDown() && interactive()==nullptr) {
+    lastHitType = (hit.flags & NetHit::StumbleB) ? 'B' : 'A';
+    visual.interrupt();
+    setAnimAngGet(lastHitType=='A' ? Anim::StumbleA : Anim::StumbleB);
+    }
+
+  // the host's hit points win, also over what the client has regenerated or lost on its own
+  const int32_t hp = attribute(ATR_HITPOINTS);
+  if(hit.hp!=hp) {
+    if(other!=nullptr)
+      currentOther = other;
+    changeAttribute(ATR_HITPOINTS,hit.hp-hp,(hit.flags & NetHit::DontKill)!=0);
+    }
+
+  if(hit.flags & NetHit::Scream)
+    emitSoundSVM("SVM_%d_AARGH");
+  }
+
+bool Npc::isNetHit(const Npc& other) {
+  auto& ids = owner.netEntities();
+  return Gothic::inst().isNetClient() && ids.id(*this) && ids.id(other);
+  }
+
+void Npc::reportNetHit(Npc& other, int32_t hpBefore, uint8_t flags) {
+  auto&             ids = owner.netEntities();
+  const NetEntityId id  = ids.id(*this);
+  if(!id || Gothic::inst().isNetClient())
+    return;
+  NetProtocol::Hit hit;
+  hit.attacker = ids.id(other).value;
+  hit.target   = id.value;
+  hit.hp       = std::max(attribute(ATR_HITPOINTS),0);
+  hit.damage   = std::max(hpBefore-hit.hp,0);
+  hit.flags    = flags;
+  owner.addNetHit(hit);
   }
 
 void Npc::takeFallDamage(const Vec3& fallSpeed) {
@@ -3822,6 +3886,8 @@ bool Npc::doAttack(Anim anim, BodyState bs) {
   visual.setAnimRotate(*this,0);
   if(auto sq = visual.continueCombo(*this,anim,bs,weaponSt,wlk)) {
     (void)sq;
+    ++attacksStarted;
+    lastAttackStarted = anim;
     // implAniWait(uint64_t(sq->atkTotalTime(visual.comboLength())+1));
     return true;
     }
@@ -3837,7 +3903,15 @@ bool Npc::blockFist() {
   if(weaponSt!=WeaponState::Fist)
     return false;
   visual.setAnimRotate(*this,0);
-  return setAnim(Anim::AttackBlock);
+  // called every frame while the key is held: only a new parade is counted
+  const bool again = lastAnimStarted==Anim::AttackBlock && visual.pose().isDefence(owner.tickCount());
+  if(!setAnim(Anim::AttackBlock))
+    return false;
+  if(!again) {
+    ++attacksStarted;
+    lastAttackStarted = Anim::AttackBlock;
+    }
+  return true;
   }
 
 bool Npc::finishingMove() {
@@ -3845,9 +3919,13 @@ bool Npc::finishingMove() {
     return false;
 
   if(doAttack(Anim::AttackFinish,BS_HIT)) {
+    if(currentTarget->isNetHit(*this))
+      return true; // the host finishes it off
+    const int32_t hp = currentTarget->attribute(ATR_HITPOINTS);
     currentTarget->hnpc->attribute[ATR_HITPOINTS] = 0;
     currentTarget->checkHealth(true,false);
     owner.sendPassivePerc(*this,*this,*currentTarget,PERC_ASSESSMURDER);
+    currentTarget->reportNetHit(*this,hp,0);
     return true;
     }
   return false;

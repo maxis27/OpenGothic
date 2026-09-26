@@ -37,6 +37,17 @@ void testEmpty() {
   NetInterpolator::Sample s;
   check(!in.sample(1000, s),                  "nothing to sample before the first state");
   check(in.newest()==nullptr,                 "no newest state");
+  int64_t t = 0;
+  check(!in.playbackTime(1000, t),            "no playback time before the first state");
+  }
+
+void testPlaybackTime() {
+  // the sender's clock runs 5000 ms behind the local one, packets take no time
+  NetInterpolator in;
+  in.push(state(1, 200, 0), 5200);
+  int64_t t = 0;
+  check(in.playbackTime(5200, t) && t==200-int64_t(NetInterpolator::Delay), "playback is Delay behind the newest state");
+  check(in.playbackTime(5400, t) && t==400-int64_t(NetInterpolator::Delay), "playback time runs with the local clock");
   }
 
 void testInterpolation() {
@@ -124,6 +135,7 @@ void testRestart() {
 int main() {
   testEmpty();
   testInterpolation();
+  testPlaybackTime();
   testLateAndDuplicate();
   testJitter();
   testRotation();

@@ -3,6 +3,7 @@
 #include <functional>
 #include <future>
 #include <cctype>
+#include <utility>
 
 #include <Tempest/Log>
 #include <Tempest/Painter>
@@ -665,6 +666,15 @@ Npc* World::addRemotePlayer(uint32_t playerId, std::string_view name, const Temp
 void World::removeRemotePlayer(uint32_t playerId) {
   if(auto npc = remotePlayer(playerId))
     removeNpc(*npc);
+  }
+
+void World::addNetHit(const NetProtocol::Hit& hit) {
+  if(netHits.size()<MaxNetHits)
+    netHits.push_back(hit);
+  }
+
+auto World::takeNetHits() -> std::vector<NetProtocol::Hit> {
+  return std::exchange(netHits, {});
   }
 
 Item *World::addItem(size_t itemInstance, std::string_view at) {

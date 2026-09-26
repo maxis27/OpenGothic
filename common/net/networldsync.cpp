@@ -3,6 +3,7 @@
 #include <Tempest/Application>
 #include <Tempest/Log>
 #include <cmath>
+#include <optional>
 #include <vector>
 
 #include "game/gamescript.h"
@@ -97,6 +98,116 @@ void sendState(NetSession& session, World& world) {
   session.sendPlayerState(s);
   }
 
+// the melee move of an attack animation started by a character, see Npc::lastAttack
+std::optional<NetProtocol::AttackMove> attackMove(AnimationSolver::Anim a) {
+  using A = AnimationSolver::Anim;
+  using M = NetProtocol::AttackMove;
+  switch(a) {
+    case A::Attack:       return M::Swing;
+    case A::AttackL:      return M::SwingLeft;
+    case A::AttackR:      return M::SwingRight;
+    case A::AttackBlock:  return M::Parade;
+    case A::AttackFinish: return M::Finish;
+    default:              return std::nullopt;
+    }
+  }
+
+// the attacks the local hero has started since the last frame; one per frame at most (the last one)
+void sendAttacks(NetSession& session, World& world) {
+  static const Npc* hero = nullptr;
+  static uint32_t   sent = 0;
+
+  auto&          pl    = *world.player();
+  const uint32_t count = pl.attackCount();
+  if(hero!=&pl || count<sent) {
+    hero = &pl; // another hero, e.g. in a newly loaded world: its earlier attacks are not news
+    sent = count;
+    return;
+    }
+  if(count==sent)
+    return;
+  sent = count;
+
+  auto&             ids = world.netEntities();
+  const NetEntityId id  = ids.id(pl);
+  const auto        mv  = attackMove(pl.lastAttack());
+  if(!id || !mv)
+    return;
+  NetSession::PlayerAttack a;
+  a.entityId = id.value;
+  a.move     = *mv;
+  if(auto t = pl.target())
+    a.target = ids.id(*t).value;
+  session.sendAttack(a);
+  }
+
+// the attacks of the other players, queued on their characters until the playback reaches them
+void receiveAttacks(NetSession& session, World& world) {
+  // few attacks are ever waiting: more are left from a character the host has replaced
+  constexpr size_t MaxWaiting = 16;
+  auto& ids = world.netEntities();
+  for(auto& a:session.takeAttacks()) {
+    for(auto& r:world.remotePlayers()) {
+      if(r.playerId!=a.playerId || ids.id(*r.npc)!=NetEntityId{a.entityId})
+        continue;
+      if(r.attacks.size()>=MaxWaiting)
+        r.attacks.pop_front();
+      r.attacks.push_back(a);
+      }
+    }
+  }
+
+// the other player's character does what the player did; on the host its blow deals the damage,
+// on a client only the host's Hit does (Npc::isNetHit)
+void replayAttack(World& world, Npc& npc, const NetSession::PlayerAttack& a) {
+  Npc* target = a.target!=0 ? world.netEntities().npc(NetEntityId{a.target}) : nullptr;
+  npc.setTarget(target!=&npc ? target : nullptr);
+
+  const auto ws = npc.weaponState();
+  if(ws!=WeaponState::Fist && ws!=WeaponState::W1H && ws!=WeaponState::W2H)
+    return; // the weapon isn't drawn (yet): no blow
+  using M = NetProtocol::AttackMove;
+  switch(a.move) {
+    case M::Swing:
+      if(ws==WeaponState::Fist)
+        npc.fistShoot(); else
+        npc.swingSword();
+      break;
+    case M::SwingLeft:
+      npc.swingSwordL();
+      break;
+    case M::SwingRight:
+      npc.swingSwordR();
+      break;
+    case M::Parade:
+      if(ws==WeaponState::Fist)
+        npc.blockFist(); else
+        npc.blockSword();
+      break;
+    case M::Finish:
+      npc.finishingMove();
+      break;
+    }
+  }
+
+// host: sends the hits in its world; client: plays the host's hits back
+void syncHits(NetSession& session, World& world) {
+  auto local = world.takeNetHits();
+  if(session.isHost()) {
+    for(auto& h:local)
+      session.sendHit(h);
+    return;
+    }
+  auto& ids = world.netEntities();
+  for(auto& h:session.takeHits()) {
+    Npc* target = ids.npc(NetEntityId{h.target});
+    if(target==nullptr)
+      continue; // not in this world (yet)
+    Npc* attacker = h.attacker!=0 ? ids.npc(NetEntityId{h.attacker}) : nullptr;
+    target->takeNetHit(attacker, h);
+    }
+  }
+
 // the host owns the clock of the world, the clients take it over
 void syncTime(NetSession& session, World& world) {
   if(session.isHost()) {
@@ -146,7 +257,9 @@ void applyAnim(World::RemotePlayer& r, const NetSession::PlayerState& s, float t
   auto& npc = *r.npc;
   npc.setWalkMode(WalkBit(s.walkMode));
 
-  if(isMovementAnim(s.anim) && (s.anim!=r.anim || isMovementLoop(s.anim)))
+  // standing still doesn't cut a blow short, like in PlayerMovement::implMove
+  const bool blow = s.anim==AnimationSolver::Anim::Idle && npc.isAttackAnim();
+  if(isMovementAnim(s.anim) && (s.anim!=r.anim || isMovementLoop(s.anim)) && !blow)
     npc.setAnim(AnimationSolver::Anim(s.anim));
   r.anim = s.anim;
 
@@ -248,8 +361,10 @@ void applyStates(NetSession& session, World& world) {
   for(auto& r:world.remotePlayers()) {
     const NetEntityId id = ids.id(*r.npc);
     if(auto* s = session.playerState(r.playerId); s!=nullptr && NetEntityId{s->entityId}==id) {
-      if(auto last = r.motion.newest(); last!=nullptr && last->entityId!=s->entityId)
+      if(auto last = r.motion.newest(); last!=nullptr && last->entityId!=s->entityId) {
         r.motion.clear(); // the host has replaced the character: forget the old one's way
+        r.attacks.clear();
+        }
       r.motion.push(*s, now); // the same state again is ignored
       }
 
@@ -269,6 +384,14 @@ void applyStates(NetSession& session, World& world) {
     applyEquipment(world, r, *cur.state);
     applyWeapon(*r.npc, WeaponState(cur.state->weaponState));
     applyAnim(r, *cur.state, turn*1000.f/float(TurnWindow));
+
+    // attacks at the moment of the player's movement they were started in, with its weapon drawn
+    int64_t t = 0;
+    r.motion.playbackTime(now, t);
+    while(!r.attacks.empty() && int64_t(r.attacks.front().time)<=t) {
+      replayAttack(world, *r.npc, r.attacks.front());
+      r.attacks.pop_front();
+      }
     }
   }
 
@@ -284,12 +407,17 @@ void NetWorldSync::tick(NetSession* session, World& world) {
   for(auto id:gone)
     world.removeRemotePlayer(id);
 
-  if(!online || world.player()==nullptr)
+  if(!online || world.player()==nullptr) {
+    world.takeNetHits(); // nobody to send them to
     return;
+    }
   if(session->isHost())
     tickHost(*session, world); else
     tickClient(*session, world);
-  syncTime (*session, world);
-  sendState(*session, world);
+  syncTime   (*session, world);
+  sendState  (*session, world);
+  sendAttacks(*session, world);
+  receiveAttacks(*session, world);
   applyStates(*session, world);
+  syncHits   (*session, world);
   }
