@@ -68,6 +68,39 @@ void tickClient(NetSession& session, World& world) {
     }
   }
 
+// the state of the local hero, sent to the other players
+void sendState(NetSession& session, World& world) {
+  auto& pl = *world.player();
+  const NetEntityId id = world.netEntities().id(pl);
+  if(!id)
+    return; // client: the host hasn't announced the hero yet
+  const auto pos = pl.position();
+  NetSession::PlayerState s;
+  s.entityId    = id.value;
+  s.x           = pos.x;
+  s.y           = pos.y;
+  s.z           = pos.z;
+  s.rotation    = pl.rotation();
+  s.bodyState   = uint32_t(pl.bodyStateMasked());
+  s.anim        = uint16_t(pl.lastAnim());
+  s.walkMode    = uint8_t(pl.walkMode());
+  s.weaponState = uint8_t(pl.weaponState());
+  session.sendPlayerState(s);
+  }
+
+// puts the other players' characters where their players have them
+// TODO(MP-11): interpolate between states and play the animation of the state
+void applyStates(NetSession& session, World& world) {
+  auto& ids = world.netEntities();
+  for(auto& r:world.remotePlayers()) {
+    auto* s = session.playerState(r.playerId);
+    if(s==nullptr || ids.id(*r.npc)!=NetEntityId{s->entityId})
+      continue; // nothing yet, or the state of a character the host has replaced since
+    r.npc->setPosition(s->x, s->y, s->z);
+    r.npc->setDirection(s->rotation);
+    }
+  }
+
 }
 
 void NetWorldSync::tick(NetSession* session, World& world) {
@@ -85,4 +118,6 @@ void NetWorldSync::tick(NetSession* session, World& world) {
   if(session->isHost())
     tickHost(*session, world); else
     tickClient(*session, world);
+  sendState(*session, world);
+  applyStates(*session, world);
   }

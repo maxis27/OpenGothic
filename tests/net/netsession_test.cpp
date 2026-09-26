@@ -3,6 +3,8 @@
 //  - a chat line typed by one player shows up at every other player, with the sender's name;
 //  - the characters the host announces (setAvatar) reach every client, newcomers included,
 //    and only a new entity id is sent again;
+//  - the character states a player sends reach every other player (through the host),
+//    no more often than StateIntervalMs, and only newer ones replace older ones;
 //  - a client leaving is announced to the others.
 // Usage: NetSessionTest <port>. Exits with 0 on success.
 
@@ -157,6 +159,50 @@ void testSession(uint16_t port) {
   check(diegoCount==1, "sender does not get its chat line back");
   check(!host.session->sendChat("   "), "blank chat is not sent");
 
+  // character states: client -> host -> other client, and host -> clients
+  const auto diegoId = diego.session->playerId();
+  NetSession::PlayerState ds;
+  ds.playerId = 77; // ignored, the sender's id goes out
+  ds.entityId = 15;
+  ds.x = 100; ds.y = 200; ds.z = 300; ds.rotation = 45;
+  ds.bodyState = 3; ds.anim = 2; ds.walkMode = 1; ds.weaponState = 4;
+  check(diego.session->sendPlayerState(ds), "client sends its state");
+  check(!diego.session->sendPlayerState(ds), "the next state waits for StateIntervalMs");
+  ds.entityId = 0;
+  check(!host.session->sendPlayerState(ds), "a state without a character is not sent");
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    return host.session->playerState(diegoId)!=nullptr && milten.session->playerState(diegoId)!=nullptr;
+    });
+  check(ok, "client state reaches the host and the other client");
+  if(ok) {
+    auto m = milten.session->playerState(diegoId);
+    check(m->playerId==diegoId && m->entityId==15 && m->x==100 && m->y==200 && m->z==300 && m->rotation==45 &&
+          m->bodyState==3 && m->anim==2 && m->walkMode==1 && m->weaponState==4 && m->seq==1,
+          "state arrives intact with the sender's id");
+    }
+  check(diego.session->playerState(diegoId)==nullptr, "a player gets no state of its own back");
+
+  NetSession::PlayerState hs;
+  hs.entityId = 10;
+  hs.x = -5;
+  check(host.session->sendPlayerState(hs), "host sends its state");
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    auto d = diego.session->playerState(NetSession::HostPlayer);
+    auto m = milten.session->playerState(NetSession::HostPlayer);
+    return d!=nullptr && d->x==-5 && m!=nullptr && m->x==-5;
+    });
+  check(ok, "host state reaches both clients");
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(NetSession::StateIntervalMs+10));
+  ds.entityId = 15;
+  ds.x = 110;
+  check(diego.session->sendPlayerState(ds), "client sends again after StateIntervalMs");
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    auto m = milten.session->playerState(diegoId);
+    return m!=nullptr && m->x==110 && m->seq==2;
+    });
+  check(ok, "a newer state replaces the older one");
+
   // leaving
   const auto miltenId = milten.session->playerId();
   milten.session.reset();
@@ -164,6 +210,7 @@ void testSession(uint16_t port) {
   check(ok, "a leaving client is announced");
   check(diego.session->avatar(miltenId)==nullptr && host.session->avatar(miltenId)==nullptr,
         "the character of a leaving player is forgotten");
+  check(host.session->playerState(diegoId)!=nullptr, "states of the remaining players stay");
   check(host.session->playerCount()==2 && diego.session->playerCount()==2, "player lists shrink");
   check(diego.session->avatar(NetSession::HostPlayer)!=nullptr && host.session->avatar(NetSession::HostPlayer)!=nullptr,
         "characters of the remaining players stay");

@@ -19,7 +19,7 @@
 namespace NetProtocol {
 
   // bump on every incompatible change of any message
-  constexpr uint16_t Version = 3;
+  constexpr uint16_t Version = 4;
   // "OGMP", identifies OpenGothic multiplayer traffic
   constexpr uint32_t Magic   = 0x504D474F;
 
@@ -39,6 +39,7 @@ namespace NetProtocol {
     PlayerJoined = 5,
     PlayerLeft   = 6,
     PlayerSpawn  = 7,
+    PlayerState  = 8,
     };
 
   enum class RejectReason : uint8_t {
@@ -97,7 +98,25 @@ namespace NetProtocol {
     float       rotation = 0;
     };
 
-  using Message = std::variant<Hello,Welcome,Reject,Chat,PlayerJoined,PlayerLeft,PlayerSpawn>;
+  // player -> server -> other players, over the unreliable channel ~20 times a second: where a
+  // player's own character is and what it is doing. Each player moves its own character;
+  // the server relays the states (with playerId filled in) and applies them to its world.
+  // seq grows with every state of one player, so a late packet can be told from a newer one;
+  // time is the sender's session clock in ms, for interpolation (MP-11).
+  struct PlayerState {
+    uint32_t    playerId    = 0;
+    uint32_t    entityId    = 0;   // character the state belongs to (PlayerSpawn::entityId)
+    uint32_t    seq         = 0;
+    uint32_t    time        = 0;
+    float       x = 0, y = 0, z = 0;
+    float       rotation    = 0;   // degrees, Npc::rotation()
+    uint32_t    bodyState   = 0;   // BodyState, Npc::bodyStateMasked()
+    uint16_t    anim        = 0;   // AnimationSolver::Anim last started by the character
+    uint8_t     walkMode    = 0;   // WalkBit
+    uint8_t     weaponState = 0;   // WeaponState
+    };
+
+  using Message = std::variant<Hello,Welcome,Reject,Chat,PlayerJoined,PlayerLeft,PlayerSpawn,PlayerState>;
 
   std::vector<uint8_t> encode(const Message& msg);
   // Returns nothing for truncated, oversized or unknown packets.

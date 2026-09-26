@@ -1004,7 +1004,10 @@ const Animation::Sequence* Npc::setAnimAngGet(Anim a) {
 const Animation::Sequence* Npc::setAnimAngGet(Anim a, uint8_t comb) {
   auto st  = weaponState();
   auto wlk = walkMode();
-  return visual.startAnimAndGet(*this,a,comb,st,wlk);
+  auto sq  = visual.startAnimAndGet(*this,a,comb,st,wlk);
+  if(sq!=nullptr || a==Anim::NoAnim)
+    lastAnimStarted = a;
+  return sq;
   }
 
 void Npc::setAnimRotate(int rot) {
