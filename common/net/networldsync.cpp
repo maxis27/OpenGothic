@@ -231,9 +231,16 @@ void replayAttack(World& world, Npc& npc, const NetSession::PlayerAttack& a) {
         npc.blockSword();
       break;
     case M::Finish:
-      if(!npc.finishingMove())
-        Log::i("multiplayer: finishing move of ", npc.displayName(), " missed: ",
-               target==nullptr ? "no target" : !target->isUnconscious() ? "target not unconscious" : "out of range");
+      if(!npc.finishingMove()) {
+        // diagnostics: which condition of Npc::canFinish/doAttack refused it on the host
+        const char* why = target==nullptr               ? "no target" :
+                          !target->isUnconscious()      ? "target not unconscious" :
+                          ws!=WeaponState::W1H && ws!=WeaponState::W2H ? "no melee weapon drawn" :
+                                                          "out of range or animation refused";
+        const float dist = target!=nullptr ? npc.fightDistanceTo(*target).length() : 0.f;
+        Log::i("multiplayer: finishing move of ", npc.displayName(), " missed: ", why,
+               " (weapon state ", int(ws), ", distance ", int(dist), ")");
+        }
       break;
     }
   }
