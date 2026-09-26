@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -62,6 +63,14 @@ void testEncoding() {
 
   auto left = roundTrip(PlayerLeft{4}, s);
   check(left!=nullptr && left->playerId==4, "PlayerLeft round trip");
+
+  auto spawn = roundTrip(PlayerSpawn{4, 17, 1.5f, -200.25f, 3e4f, 270.f}, s);
+  check(spawn!=nullptr && spawn->playerId==4 && spawn->entityId==17 && spawn->x==1.5f &&
+        spawn->y==-200.25f && spawn->z==3e4f && spawn->rotation==270.f, "PlayerSpawn round trip");
+  auto nanSpawn = encode(PlayerSpawn{4, 17, std::numeric_limits<float>::quiet_NaN(), 0, 0, 0});
+  check(!decode(nanSpawn.data(), nanSpawn.size()), "PlayerSpawn with NaN position is refused");
+  auto noIdSpawn = encode(PlayerSpawn{4, 0, 0, 0, 0, 0});
+  check(!decode(noIdSpawn.data(), noIdSpawn.size()), "PlayerSpawn without entity id is refused");
 
   // too long strings are cut on encode
   auto longChat = roundTrip(Chat{1, std::string(MaxChatLength+100, 'a')}, s);

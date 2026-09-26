@@ -1,5 +1,8 @@
 #include "netprotocol.h"
 
+#include <bit>
+#include <cmath>
+
 using namespace NetProtocol;
 
 namespace {
@@ -10,6 +13,7 @@ class Writer {
     void u16(uint16_t v) { put(v, 2); }
     void u32(uint32_t v) { put(v, 4); }
     void u64(uint64_t v) { put(v, 8); }
+    void f32(float v)    { u32(std::bit_cast<uint32_t>(v)); }
     void str(const std::string& s, size_t maxLength) {
       const size_t len = s.size()<maxLength ? s.size() : maxLength;
       u16(uint16_t(len));
@@ -33,6 +37,8 @@ class Reader {
     bool u16(uint16_t& v) { uint64_t x=0; if(!get(x,2)) return false; v = uint16_t(x); return true; }
     bool u32(uint32_t& v) { uint64_t x=0; if(!get(x,4)) return false; v = uint32_t(x); return true; }
     bool u64(uint64_t& v) { return get(v,8); }
+    // only finite values: a NaN or infinity would poison positions in the world
+    bool f32(float& v) { uint32_t x=0; if(!u32(x)) return false; v = std::bit_cast<float>(x); return std::isfinite(v); }
     bool str(std::string& s, size_t maxLength) {
       uint16_t len = 0;
       if(!u16(len) || len>maxLength || len>size-pos)
@@ -98,6 +104,16 @@ void write(Writer& w, const PlayerLeft& m) {
   w.u32(m.playerId);
   }
 
+void write(Writer& w, const PlayerSpawn& m) {
+  w.u8 (uint8_t(MsgType::PlayerSpawn));
+  w.u32(m.playerId);
+  w.u32(m.entityId);
+  w.f32(m.x);
+  w.f32(m.y);
+  w.f32(m.z);
+  w.f32(m.rotation);
+  }
+
 std::optional<Message> readHello(Reader& r) {
   Hello    m;
   uint32_t magic = 0;
@@ -148,6 +164,14 @@ std::optional<Message> readPlayerLeft(Reader& r) {
   return m;
   }
 
+std::optional<Message> readPlayerSpawn(Reader& r) {
+  PlayerSpawn m;
+  if(!r.u32(m.playerId) || !r.u32(m.entityId) || m.entityId==0 ||
+     !r.f32(m.x) || !r.f32(m.y) || !r.f32(m.z) || !r.f32(m.rotation) || !r.atEnd())
+    return std::nullopt;
+  return m;
+  }
+
 bool isValidName(const std::string& name) {
   if(name.empty() || name.size()>MaxNameLength)
     return false;
@@ -177,6 +201,7 @@ std::optional<Message> NetProtocol::decode(const uint8_t* data, size_t size) {
     case MsgType::Chat:    return readChat(r);
     case MsgType::PlayerJoined: return readPlayerJoined(r);
     case MsgType::PlayerLeft:   return readPlayerLeft(r);
+    case MsgType::PlayerSpawn:  return readPlayerSpawn(r);
     }
   return std::nullopt;
   }

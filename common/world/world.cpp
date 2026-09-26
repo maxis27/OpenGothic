@@ -611,7 +611,51 @@ Npc* World::addNpc(size_t npcInstance, const Tempest::Vec3& at) {
   }
 
 void World::removeNpc(Npc& npc) {
+  for(size_t i=0; i<remotePl.size(); ++i)
+    if(remotePl[i].npc==&npc) {
+      remotePl.erase(remotePl.begin()+ptrdiff_t(i));
+      break;
+      }
   return wobj.removeNpc(npc);
+  }
+
+Npc* World::remotePlayer(uint32_t playerId) const {
+  for(auto& r:remotePl)
+    if(r.playerId==playerId)
+      return r.npc;
+  return nullptr;
+  }
+
+Npc* World::addRemotePlayer(uint32_t playerId, std::string_view name, const Tempest::Vec3& pos, float rotation) {
+  if(auto npc = remotePlayer(playerId))
+    return npc;
+
+  const size_t id = script().findSymbolIndex(Gothic::inst().defaultPlayer());
+  if(id==size_t(-1))
+    return nullptr;
+  auto* sym = script().findSymbol(id);
+  if(sym==nullptr)
+    return nullptr;
+
+  // creating the npc points the instance symbol (PC_HERO) at it; scripts must keep seeing the local hero
+  const auto prev = sym->get_instance();
+  Npc*       npc  = wobj.addNpc(id, pos);
+  sym->set_instance(prev);
+
+  // stands and animates, but runs no AI: the other player drives it
+  npc->setProcessPolicy(NpcProcessPolicy::NetProxy);
+  npc->setDirection(rotation);
+  if(!name.empty())
+    npc->handle().name[0] = std::string(name);
+  npc->updateTransform();
+
+  remotePl.push_back({playerId, npc});
+  return npc;
+  }
+
+void World::removeRemotePlayer(uint32_t playerId) {
+  if(auto npc = remotePlayer(playerId))
+    removeNpc(*npc);
   }
 
 Item *World::addItem(size_t itemInstance, std::string_view at) {

@@ -19,7 +19,7 @@
 namespace NetProtocol {
 
   // bump on every incompatible change of any message
-  constexpr uint16_t Version = 2;
+  constexpr uint16_t Version = 3;
   // "OGMP", identifies OpenGothic multiplayer traffic
   constexpr uint32_t Magic   = 0x504D474F;
 
@@ -38,6 +38,7 @@ namespace NetProtocol {
     Chat    = 4,
     PlayerJoined = 5,
     PlayerLeft   = 6,
+    PlayerSpawn  = 7,
     };
 
   enum class RejectReason : uint8_t {
@@ -85,7 +86,18 @@ namespace NetProtocol {
     uint32_t    playerId = 0;
     };
 
-  using Message = std::variant<Hello,Welcome,Reject,Chat,PlayerJoined,PlayerLeft>;
+  // server -> client: the character of a player is in the server's world under network id
+  // entityId (see NetEntityId), at position x,y,z turned by rotation (degrees, Npc::rotation()).
+  // Sent when a character is spawned or respawned with a new id, and to a newcomer right after
+  // Welcome for every character already there. For its own player the client only takes over the id.
+  struct PlayerSpawn {
+    uint32_t    playerId = 0;
+    uint32_t    entityId = 0;
+    float       x = 0, y = 0, z = 0;
+    float       rotation = 0;
+    };
+
+  using Message = std::variant<Hello,Welcome,Reject,Chat,PlayerJoined,PlayerLeft,PlayerSpawn>;
 
   std::vector<uint8_t> encode(const Message& msg);
   // Returns nothing for truncated, oversized or unknown packets.

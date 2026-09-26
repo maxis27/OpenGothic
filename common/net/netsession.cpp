@@ -59,6 +59,23 @@ std::string_view NetSession::playerName(PlayerId id) const {
   return it->second;
   }
 
+auto NetSession::avatar(PlayerId id) const -> const Avatar* {
+  auto it = avatars.find(id);
+  if(it==avatars.end())
+    return nullptr;
+  return &it->second;
+  }
+
+void NetSession::setAvatar(const Avatar& a) {
+  if(!server || players.count(a.playerId)==0 || a.entityId==0)
+    return;
+  auto it = avatars.find(a.playerId);
+  if(it!=avatars.end() && it->second.entityId==a.entityId)
+    return; // already known to everyone; movement is not sent here
+  avatars[a.playerId] = a;
+  sendOthers(NetTransport::InvalidPeer, a);
+  }
+
 void NetSession::poll(uint32_t timeoutMs) {
   if(st==State::Closed)
     return;
@@ -101,6 +118,7 @@ void NetSession::hostEvent(const NetTransport::Event& e) {
         return;
       notify(std::string(playerName(id)) + " left the game");
       players.erase(id);
+      avatars.erase(id);
       sendOthers(e.peer, PlayerLeft{id});
       return;
       }
@@ -146,6 +164,8 @@ void NetSession::onHello(NetTransport::PeerId peer, const Hello& hello) {
   for(auto& [pid,pname]:players)
     send(peer, PlayerJoined{pid, pname});
   send(peer, Welcome{id, world, nowMs()-startTime});
+  for(auto& [pid,a]:avatars)
+    send(peer, a);
   sendOthers(peer, PlayerJoined{id, hello.name});
 
   peers[peer] = id;
@@ -171,6 +191,7 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
         notify("Unable to connect to the host");
       st = State::Closed;
       players.clear();
+      avatars.clear();
       return;
     case NetTransport::EventType::Receive:
       break;
@@ -184,6 +205,7 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
     notify(describe(*m));
     st = State::Closed;
     players.clear();
+    avatars.clear();
     return;
     }
   if(auto m = std::get_if<Welcome>(&*msg)) {
@@ -205,6 +227,12 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
     if(st==State::Online && players.count(m->playerId))
       notify(std::string(playerName(m->playerId)) + " left the game");
     players.erase(m->playerId);
+    avatars.erase(m->playerId);
+    return;
+    }
+  if(auto m = std::get_if<PlayerSpawn>(&*msg)) {
+    if(st==State::Online && players.count(m->playerId))
+      avatars[m->playerId] = *m;
     return;
     }
   if(auto m = std::get_if<Chat>(&*msg)) {
