@@ -164,7 +164,7 @@ std::optional<NetProtocol::AttackMove> attackMove(const Npc& npc) {
   using A = AnimationSolver::Anim;
   using M = NetProtocol::AttackMove;
   if(npc.lastCast()!=0)
-    return npc.lastCastLevel()==0 ? M::Invest : M::Cast;
+    return npc.lastCastLevel()!=0 ? M::Cast : npc.lastCastReleased() ? M::Release : M::Invest;
   const auto a  = npc.lastAttack();
   const auto ws = npc.weaponState();
   if(ws==WeaponState::Bow || ws==WeaponState::CBow)
@@ -209,7 +209,8 @@ void sendAttacks(NetSession& session, World& world) {
     a.dy = pl.lastShot().y;
     a.dz = pl.lastShot().z;
     }
-  if(a.move==NetProtocol::AttackMove::Invest || a.move==NetProtocol::AttackMove::Cast) {
+  if(a.move==NetProtocol::AttackMove::Invest || a.move==NetProtocol::AttackMove::Release ||
+     a.move==NetProtocol::AttackMove::Cast) {
     a.spell = uint32_t(pl.lastCast());
     a.level = pl.lastCastLevel();
     }
@@ -248,14 +249,16 @@ void replayAttack(World& world, Npc& npc, const NetSession::PlayerAttack& a) {
       Log::i("multiplayer: shot of ", npc.displayName(), " missed: no bow or crossbow equipped");
     return;
     }
-  if(a.move==M::Invest || a.move==M::Cast) {
+  if(a.move==M::Invest || a.move==M::Release || a.move==M::Cast) {
     if(!isItemInstance(world, a.spell)) {
       Log::e("multiplayer: unknown spell ", a.spell, " of ", npc.displayName());
       return;
       }
-    // like a shot: the spell is cast even if it isn't drawn here yet, only the charging waits for it
+    // like a shot: the spell is cast even if it isn't drawn here yet, only the animations wait for it
     if(a.move==M::Invest)
       npc.netInvestSpell(a.spell);
+    else if(a.move==M::Release)
+      npc.netReleaseSpell(a.spell);
     else if(!npc.netCastSpell(a.spell, a.level, target, Vec3(a.dx, a.dy, a.dz)))
       Log::e("multiplayer: spell ", a.spell, " of ", npc.displayName(), " is not a rune or scroll");
     return;
@@ -295,6 +298,7 @@ void replayAttack(World& world, Npc& npc, const NetSession::PlayerAttack& a) {
       break;
     case M::Shoot:
     case M::Invest:
+    case M::Release:
     case M::Cast:
       break;
     }

@@ -19,7 +19,7 @@
 namespace NetProtocol {
 
   // bump on every incompatible change of any message
-  constexpr uint16_t Version = 10;
+  constexpr uint16_t Version = 11;
   // "OGMP", identifies OpenGothic multiplayer traffic
   constexpr uint32_t Magic   = 0x504D474F;
 
@@ -146,6 +146,7 @@ namespace NetProtocol {
     Shoot      = 6, // ActForward with a bow or crossbow drawn: an arrow or bolt is fired (MP-17)
     Invest     = 7, // ActForward with a spell drawn: the player starts charging a spell (MP-18)
     Cast       = 8, // the spell is released: its projectile or effect is emitted (MP-18)
+    Release    = 9, // the cast animation of a spell starts, before Cast emits it
     };
 
   // player -> server -> other players, reliable: a player's character has started an attack.
@@ -160,7 +161,7 @@ namespace NetProtocol {
     uint32_t    target   = 0;   // entity id of the character aimed at, 0: none
     AttackMove  move     = AttackMove::Swing;
     float       dx = 0, dy = 0, dz = 0; // Shoot, Cast: initial velocity of the arrow or spell projectile; 0,0,0 otherwise
-    uint32_t    spell    = 0;   // Invest, Cast: script symbol of the rune or scroll (never 0); 0 otherwise
+    uint32_t    spell    = 0;   // Invest, Release, Cast: script symbol of the rune or scroll (never 0); 0 otherwise
     uint8_t     level    = 0;   // Cast: level the spell was charged to, 1..MaxSpellLevel; 0 otherwise
     };
 
