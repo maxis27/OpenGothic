@@ -99,6 +99,18 @@ class NetSession final {
     // Client: the host's time received since the last call, nothing when none came.
     auto     takeWorldTime() -> std::optional<int64_t>;
 
+    // Npcs of the host's world (MP-19): the host has them all, the clients create only the ones the host spawns.
+    using Entity = NetProtocol::SpawnEntity;
+    // Host: every npc of its world other than the players' characters, called every frame. The clients are
+    // sent the ones they don't have yet (a new id, or an id now naming another instance) and told which are
+    // gone; the rest only keeps what newcomers get right after Welcome up to date. Ignored on a client.
+    void     setEntities(std::vector<Entity> list);
+    // Entities of the host's world by id: on the host as last set, on a client as spawned by the host.
+    auto     entities() const -> const std::map<uint32_t,Entity>& { return entityMap; }
+    // Grows with every change of entities() on a client: its world needs to follow when it differs from the
+    // one it followed last. Stays 0 on the host.
+    uint64_t entitiesVersion() const { return entityVersion; }
+
     // Service the network: handshake, chat, players joining and leaving.
     void     poll(uint32_t timeoutMs = 0);
     // Send a chat line to the other players; false when offline or the text is empty.
@@ -119,6 +131,7 @@ class NetSession final {
     void     onPlayerState(PlayerId from, NetProtocol::PlayerState s, NetTransport::PeerId peer);
     void     onAttack     (PlayerId from, NetProtocol::PlayerAttack a, NetTransport::PeerId peer);
     void     forgetPlayer (PlayerId id);
+    void     clearWorld   ();
 
     void     send       (NetTransport::PeerId peer, const NetProtocol::Message& msg,
                          NetTransport::Channel ch = NetTransport::Reliable);
@@ -143,6 +156,8 @@ class NetSession final {
     std::vector<PlayerAttack>                        attacks;
     std::vector<Hit>                                 hits;
     std::vector<Avatar>                              respawns;
+    std::map<uint32_t,Entity>                        entityMap;
+    uint64_t                                         entityVersion = 0;
     // host: last time of its world set and last one sent (with when); client: the host's time not taken yet
     std::optional<int64_t>                           worldTime;
     std::optional<int64_t>                           worldTimeSent;

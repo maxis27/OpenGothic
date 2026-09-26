@@ -609,15 +609,31 @@ Npc *World::addNpc(std::string_view name, std::string_view at) {
   size_t id = script().findSymbolIndex(name);
   if(id==size_t(-1))
     return nullptr;
-  return wobj.addNpc(id,at);
+  return addNpc(id,at);
   }
 
 Npc *World::addNpc(size_t npcInstance, std::string_view at) {
+  if(Gothic::inst().isNetClient())
+    return nullptr; // Wld_InsertNpc of the world's startup and all later ones: the host has these npcs
   return wobj.addNpc(npcInstance,at);
   }
 
 Npc* World::addNpc(size_t npcInstance, const Tempest::Vec3& at) {
+  if(Gothic::inst().isNetClient())
+    return nullptr; // Wld_SpawnNpcRange (summons, ...): the host spawns them if its world has them
   return wobj.addNpc(npcInstance,at);
+  }
+
+Npc* World::addNetNpc(size_t npcInstance, const Tempest::Vec3& pos, float rotation) {
+  auto* sym = script().findSymbol(npcInstance);
+  if(sym==nullptr || sym->type()!=zenkit::DaedalusDataType::INSTANCE)
+    return nullptr;
+  Npc* npc = wobj.addNpc(npcInstance, pos);
+  // stands and animates, but runs no AI: the host's world moves it
+  npc->setProcessPolicy(NpcProcessPolicy::NetProxy);
+  npc->setDirection(rotation);
+  npc->updateTransform();
+  return npc;
   }
 
 void World::removeNpc(Npc& npc) {
@@ -666,6 +682,13 @@ Npc* World::addRemotePlayer(uint32_t playerId, std::string_view name, const Temp
 void World::removeRemotePlayer(uint32_t playerId) {
   if(auto npc = remotePlayer(playerId))
     removeNpc(*npc);
+  }
+
+bool World::isRemotePlayer(const Npc& npc) const {
+  for(auto& r:remotePl)
+    if(r.npc==&npc)
+      return true;
+  return false;
   }
 
 void World::addNetHit(const NetProtocol::Hit& hit) {

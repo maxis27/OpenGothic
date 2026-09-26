@@ -131,6 +131,13 @@ class World final {
     // Spawns the default player character (PC_HERO) as a NetProxy npc, or returns the existing one.
     Npc*                 addRemotePlayer(uint32_t playerId, std::string_view name, const Tempest::Vec3& pos, float rotation);
     void                 removeRemotePlayer(uint32_t playerId);
+    bool                 isRemotePlayer(const Npc& npc) const;
+    // Multiplayer client: spawns an npc of the host's world (NetProtocol::SpawnEntity) as a NetProxy npc, the
+    // only way a client gets npcs: addNpc refuses there (MP-19). Returns nullptr for an unknown instance.
+    Npc*                 addNetNpc(size_t npcInstance, const Tempest::Vec3& pos, float rotation);
+    // multiplayer client: NetSession::entitiesVersion() the npcs of this world were last brought in line with
+    uint64_t             netNpcsVersion() const { return netNpcsVer; }
+    void                 setNetNpcsVersion(uint64_t v) { netNpcsVer = v; }
     auto                 netEntities() -> NetEntityRegistry& { return wobj.netEntities(); }
     // Hits on characters with a network id (Npc::reportNetHit), for the multiplayer host to send
     // to the clients; kept until taken, at most MaxNetHits of them.
@@ -181,6 +188,7 @@ class World final {
     bool                 isInDialog() const;
 
     bool                 isTargeted (Npc& npc);
+    // A multiplayer client creates no npcs of its own, the host spawns them (addNetNpc): these return nullptr there
     Npc*                 addNpc     (std::string_view name, std::string_view     at);
     Npc*                 addNpc     (size_t npcInstance,    std::string_view     at);
     Npc*                 addNpc     (size_t npcInstance,    const Tempest::Vec3& at);
@@ -243,6 +251,7 @@ class World final {
     Npc*                                  npcPlayer=nullptr;
     std::vector<RemotePlayer>             remotePl;
     std::vector<NetProtocol::Hit>         netHits;
+    uint64_t                              netNpcsVer = uint64_t(-1);
 
     std::unique_ptr<DynamicWorld>         wdynamic;
     std::unique_ptr<WorldView>            wview;

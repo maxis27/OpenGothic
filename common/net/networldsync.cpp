@@ -2,6 +2,7 @@
 
 #include <Tempest/Application>
 #include <Tempest/Log>
+#include <algorithm>
 #include <cmath>
 #include <map>
 #include <optional>
@@ -18,17 +19,21 @@ using namespace Tempest;
 
 namespace {
 
-// true, if symbol is an item instance of the scripts (C_ITEM), which the other player's weapon should be;
-// both sides run the same scripts, so their symbol numbers are the same
-bool isItemInstance(World& world, uint32_t symbol) {
+// true, if symbol is an instance of the scripts of class cls (C_ITEM, C_NPC), which the one sent by the other
+// player or the host should be; both sides run the same scripts, so their symbol numbers are the same
+bool isInstanceOf(World& world, uint32_t symbol, std::string_view cls) {
   auto& sc  = world.script();
   auto* sym = sc.findSymbol(symbol);
   if(sym==nullptr || sym->type()!=zenkit::DaedalusDataType::INSTANCE || sym->address()==0)
     return false;
-  const zenkit::DaedalusSymbol* cls = sym;
-  while(cls!=nullptr && cls->parent()!=uint32_t(-1))
-    cls = sc.findSymbol(cls->parent());
-  return cls!=nullptr && cls!=sym && cls->name()=="C_ITEM";
+  const zenkit::DaedalusSymbol* base = sym;
+  while(base!=nullptr && base->parent()!=uint32_t(-1))
+    base = sc.findSymbol(base->parent());
+  return base!=nullptr && base!=sym && base->name()==cls;
+  }
+
+bool isItemInstance(World& world, uint32_t symbol) {
+  return isInstanceOf(world, symbol, "C_ITEM");
   }
 
 // gives npc the network id from the host; false when it's taken by another object
@@ -126,6 +131,83 @@ void tickClient(NetSession& session, World& world) {
       continue; // not in this world, or respawned once more since
     npc->netRespawn(Vec3(a.x, a.y, a.z), a.rotation);
     }
+  }
+
+// host: the npcs of its world, for the clients to have them too (MP-19)
+void sendNpcs(NetSession& session, World& world) {
+  auto& ids = world.netEntities();
+  std::vector<NetSession::Entity> list;
+  list.reserve(world.npcCount());
+  for(uint32_t i=0; i<world.npcCount(); ++i) {
+    Npc& npc = *world.npcById(i);
+    const NetEntityId id = ids.id(npc);
+    if(!id || npc.isNetPlayer())
+      continue; // the players' characters are spawned by PlayerSpawn
+    const auto pos = npc.position();
+    NetSession::Entity e;
+    e.entityId = id.value;
+    e.kind     = NetProtocol::EntityKind::Npc;
+    e.instance = npc.instanceSymbol();
+    e.x        = pos.x;
+    e.y        = pos.y;
+    e.z        = pos.z;
+    e.rotation = npc.rotation();
+    e.hp       = std::max(npc.attribute(ATR_HITPOINTS), 0);
+    if(npc.isDead())
+      e.flags = NetSession::Entity::Dead;
+    else if(npc.isUnconscious())
+      e.flags = NetSession::Entity::Unconscious;
+    list.push_back(e);
+    }
+  session.setEntities(std::move(list));
+  }
+
+// client: has the npcs the host has spawned, and no others (World::addNpc refuses on a client)
+void receiveNpcs(NetSession& session, World& world) {
+  if(world.netNpcsVersion()==session.entitiesVersion())
+    return;
+  auto& ids  = world.netEntities();
+  auto& list = session.entities();
+
+  // gone from the host's world, or their id names another npc now
+  std::vector<Npc*> gone;
+  for(uint32_t i=0; i<world.npcCount(); ++i) {
+    Npc& npc = *world.npcById(i);
+    const NetEntityId id = ids.id(npc);
+    if(!id || npc.isNetPlayer())
+      continue;
+    auto it = list.find(id.value);
+    if(it==list.end() || it->second.instance!=npc.instanceSymbol())
+      gone.push_back(&npc);
+    }
+  for(auto* npc:gone)
+    world.removeNpc(*npc);
+
+  for(auto& [eid,e]:list) {
+    const NetEntityId id{eid};
+    if(ids.npc(id)!=nullptr)
+      continue; // spawned already; where it goes from there is MP-20
+    if(!isInstanceOf(world, e.instance, "C_NPC")) {
+      Log::e("multiplayer: unknown npc instance ", e.instance, " of entity ", eid);
+      continue;
+      }
+    Npc* npc = world.addNetNpc(e.instance, Vec3(e.x, e.y, e.z), e.rotation);
+    if(npc==nullptr)
+      continue;
+    if(!ids.bind(id, *npc)) {
+      Log::e("multiplayer: network id ", eid, " of ", npc->displayName(), " is taken");
+      world.removeNpc(*npc);
+      continue;
+      }
+    // what the host's scripts have done to it since it was made
+    auto& hnpc = npc->handle();
+    hnpc.attribute[ATR_HITPOINTS] = std::clamp(e.hp, 0, std::max(hnpc.attribute[ATR_HITPOINTSMAX], 1));
+    if(e.flags & NetSession::Entity::Dead)
+      npc->netDown(true);
+    else if(e.flags & NetSession::Entity::Unconscious)
+      npc->netDown(false);
+    }
+  world.setNetNpcsVersion(session.entitiesVersion());
   }
 
 // the state of the local hero, sent to the other players
@@ -556,9 +638,13 @@ void NetWorldSync::tick(NetSession* session, World& world) {
     world.takeNetHits(); // nobody to send them to
     return;
     }
-  if(session->isHost())
-    tickHost(*session, world); else
+  if(session->isHost()) {
+    tickHost(*session, world);
+    sendNpcs(*session, world);
+    } else {
     tickClient(*session, world);
+    receiveNpcs(*session, world);
+    }
   syncTime   (*session, world);
   sendState  (*session, world);
   sendAttacks(*session, world);

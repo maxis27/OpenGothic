@@ -23,6 +23,9 @@ class World;
 //    run only for the caster's own character (MP-18);
 //  - a character falls dead or unconscious as the host's Hit or its own player says, gets up when its
 //    player's does; the host respawns a dead one at the start point after RespawnDelayMs (MP-16);
+//  - the host sends the npcs of its world, the clients have only these: they create none of their own, not even
+//    the ones of the world's startup scripts (World::addNpc); an npc the host no longer has is removed (MP-19).
+//    They stand where the host had them when they were spawned and run no AI (NetProxy);
 //  - the host sends the time of day of its world, the clients take it over (MP-12);
 //  - characters of players who left are removed, all of them once the session is gone.
 // Called every frame. A newly loaded world has no remote players yet and is filled again.

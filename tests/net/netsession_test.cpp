@@ -10,6 +10,8 @@
 //  - attacks reach every other player (through the host), only with the sender's own character;
 //    the host's hits reach every client;
 //  - a respawned character reaches every client as a respawn, a newcomer gets it as a plain one;
+//  - the npcs the host sets reach every client, newcomers included as they are then: new and replaced
+//    ones are spawned, missing ones despawned, only changes bump the clients' version;
 //  - a client leaving is announced to the others.
 // Usage: NetSessionTest <port>. Exits with 0 on success.
 
@@ -290,14 +292,42 @@ void testSession(uint16_t port) {
         "a respawn arrives intact and replaces the character");
   check(host.session->takeRespawns().empty(), "the host takes no respawns");
 
+  // npcs: 30 and 31 spawned, then 31 gone, 30 moved (not sent), 32 new and 33 new with 30's old instance
+  using Ent = NetSession::Entity;
+  const auto Npc = NetProtocol::EntityKind::Npc;
+  diego.session->setEntities({{40, Npc, 7}}); // clients can't
+  host.session->setEntities({{31, Npc, 200, 1, 2, 3, 90, 50}, {30, Npc, 100, 4, 5, 6, 0, 40, Ent::Unconscious}});
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    return diego.session->entities().size()==2 && milten.session->entities().size()==2;
+    });
+  check(ok, "npcs reach every client");
+  check(host.session->entitiesVersion()==0 && diego.session->entitiesVersion()==2, "only clients count npc changes");
+  if(ok) {
+    auto& e = diego.session->entities().at(30);
+    check(e.instance==100 && e.x==4 && e.hp==40 && e.flags==Ent::Unconscious, "an npc arrives intact");
+    }
+  host.session->setEntities({{30, Npc, 100, 7, 8, 9, 0, 0, Ent::Dead}, {32, Npc, 300}, {33, Npc, 100}});
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    return diego.session->entities().count(33)>0 && milten.session->entities().count(33)>0;
+    });
+  check(ok && diego.session->entities().count(31)==0 && diego.session->entities().size()==3,
+        "npcs gone from the host's world are despawned, new ones spawned");
+  check(ok && diego.session->entities().at(30).x==4, "a known npc isn't sent again");
+  check(diego.session->entitiesVersion()==5, "every spawn and despawn counts");
+  host.session->setEntities({{30, Npc, 101}, {32, Npc, 300}, {33, Npc, 100}});
+  ok = runUntil({&host,&diego,&milten}, [&]{ return diego.session->entities().at(30).instance==101; });
+  check(ok, "an id naming another npc is spawned again");
+
   Player gorn;
   gorn.session = NetSession::connect("127.0.0.1", port, "Gorn");
   gorn.attach("Gorn");
   ok = runUntil({&host,&diego,&milten,&gorn}, [&]{
-    return gorn.session->avatar(diegoId)!=nullptr;
+    return gorn.session->avatar(diegoId)!=nullptr && gorn.session->entities().size()==3;
     });
   check(ok && gorn.session->avatar(diegoId)->entityId==16 && gorn.session->avatar(diegoId)->flags==0 &&
         gorn.session->takeRespawns().empty(), "a newcomer gets a respawned character as a plain one");
+  check(ok && gorn.session->entities().at(30).instance==101 && gorn.session->entities().at(32).instance==300,
+        "a newcomer gets the npcs as they are now");
   gorn.session.reset();
   ok = runUntil({&host,&diego,&milten}, [&]{ return diego.saw("Gorn left the game"); });
   check(ok, "the newcomer leaves again");
@@ -319,6 +349,7 @@ void testSession(uint16_t port) {
   ok = runUntil({&diego}, [&]{ return diego.session->state()==NetSession::State::Closed; });
   check(ok, "client notices the host is gone");
   check(!diego.session->sendChat("anyone?"), "no chat once closed");
+  check(diego.session->entities().empty(), "the npcs are forgotten once closed");
   }
 
 void testNoHost(uint16_t port) {

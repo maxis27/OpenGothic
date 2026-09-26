@@ -164,6 +164,24 @@ void write(Writer& w, const Hit& m) {
   w.u32(uint32_t(m.spell));
   }
 
+void write(Writer& w, const SpawnEntity& m) {
+  w.u8 (uint8_t(MsgType::SpawnEntity));
+  w.u32(m.entityId);
+  w.u8 (uint8_t(m.kind));
+  w.u32(m.instance);
+  w.f32(m.x);
+  w.f32(m.y);
+  w.f32(m.z);
+  w.f32(m.rotation);
+  w.u32(uint32_t(m.hp));
+  w.u8 (m.flags);
+  }
+
+void write(Writer& w, const DespawnEntity& m) {
+  w.u8 (uint8_t(MsgType::DespawnEntity));
+  w.u32(m.entityId);
+  }
+
 std::optional<Message> readHello(Reader& r) {
   Hello    m;
   uint32_t magic = 0;
@@ -272,6 +290,31 @@ std::optional<Message> readHit(Reader& r) {
   return m;
   }
 
+std::optional<Message> readSpawnEntity(Reader& r) {
+  SpawnEntity m;
+  uint8_t     kind = 0;
+  uint32_t    hp   = 0;
+  if(!r.u32(m.entityId) || m.entityId==0 || !r.u8(kind) || kind!=uint8_t(EntityKind::Npc) ||
+     !r.u32(m.instance) || m.instance==0 ||
+     !r.f32(m.x) || !r.f32(m.y) || !r.f32(m.z) || !r.f32(m.rotation) || !r.u32(hp) ||
+     !r.u8(m.flags) || (m.flags & ~SpawnEntity::AllFlags)!=0 || !r.atEnd())
+    return std::nullopt;
+  if((m.flags & SpawnEntity::Dead) && (m.flags & SpawnEntity::Unconscious))
+    return std::nullopt;
+  m.kind = EntityKind(kind);
+  m.hp   = int32_t(hp);
+  if(m.hp<0)
+    return std::nullopt;
+  return m;
+  }
+
+std::optional<Message> readDespawnEntity(Reader& r) {
+  DespawnEntity m;
+  if(!r.u32(m.entityId) || m.entityId==0 || !r.atEnd())
+    return std::nullopt;
+  return m;
+  }
+
 bool isValidName(const std::string& name) {
   if(name.empty() || name.size()>MaxNameLength)
     return false;
@@ -306,6 +349,8 @@ std::optional<Message> NetProtocol::decode(const uint8_t* data, size_t size) {
     case MsgType::WorldTime:    return readWorldTime(r);
     case MsgType::PlayerAttack: return readPlayerAttack(r);
     case MsgType::Hit:          return readHit(r);
+    case MsgType::SpawnEntity:  return readSpawnEntity(r);
+    case MsgType::DespawnEntity: return readDespawnEntity(r);
     }
   return std::nullopt;
   }
