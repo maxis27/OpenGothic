@@ -174,10 +174,12 @@ class Npc final {
     bool       setAnim(Anim a);
     // last animation started through setAnim/setAnimAngGet, for multiplayer
     Anim       lastAnim() const { return lastAnimStarted; }
-    // melee attacks and parades started (doAttack, blockFist): how many so far and the animation
-    // of the last one, for multiplayer
-    uint32_t   attackCount() const { return attacksStarted;    }
-    Anim       lastAttack()  const { return lastAttackStarted; }
+    // melee attacks and parades started (doAttack, blockFist): how many so far, the animation
+    // of the last one and the network id of its target (0: none), for multiplayer; the target is
+    // taken when the attack starts, the focus may be lost right after (finishing moves)
+    uint32_t   attackCount()      const { return attacksStarted;    }
+    Anim       lastAttack()       const { return lastAttackStarted; }
+    uint32_t   lastAttackTarget() const { return lastAttackTargetId; }
     auto       setAnimAngGet(Anim a) -> const Animation::Sequence*;
     auto       setAnimAngGet(Anim a, uint8_t comb) -> const Animation::Sequence*;
     void       setAnimRotate(int rot);
@@ -586,6 +588,7 @@ class Npc final {
     Anim                           lastAnimStarted         =Anim::NoAnim;
     uint32_t                       attacksStarted          =0;
     Anim                           lastAttackStarted       =Anim::NoAnim;
+    uint32_t                       lastAttackTargetId      =0;
     int32_t                        trGuild                 =GIL_NONE;
     int32_t                        talentsSk[TALENT_MAX_G2]={};
     int32_t                        talentsVl[TALENT_MAX_G2]={};
