@@ -17,6 +17,10 @@ class World;
 //    every hit, the clients play its effects and take the hit points over (MP-15);
 //  - a shot is fired again by the copies of the shooter, at the target where each world has it; only the
 //    arrow of the host's copy deals damage, like a blow (MP-17);
+//  - a spell is drawn, charged and cast again by the copies of the caster: its projectile at the target where
+//    each world has it, its other effects on the target; only the host's copy deals damage and the host's Hit
+//    carries the spell, for its effect on the target. The spell's scripts (mana, summons, transformations)
+//    run only for the caster's own character (MP-18);
 //  - a character falls dead or unconscious as the host's Hit or its own player says, gets up when its
 //    player's does; the host respawns a dead one at the start point after RespawnDelayMs (MP-16);
 //  - the host sends the time of day of its world, the clients take it over (MP-12);

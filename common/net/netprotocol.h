@@ -19,7 +19,7 @@
 namespace NetProtocol {
 
   // bump on every incompatible change of any message
-  constexpr uint16_t Version = 9;
+  constexpr uint16_t Version = 10;
   // "OGMP", identifies OpenGothic multiplayer traffic
   constexpr uint32_t Magic   = 0x504D474F;
 
@@ -126,6 +126,7 @@ namespace NetProtocol {
     uint8_t     weaponState = 0;   // WeaponState
     uint32_t    meleeWeapon  = 0;  // script symbol of the equipped melee weapon (Item::clsId()), 0: none
     uint32_t    rangedWeapon = 0;  // script symbol of the equipped bow or crossbow, 0: none
+    uint32_t    spell        = 0;  // script symbol of the rune or scroll in hand (weaponState Mage), 0: none (MP-18)
     };
 
   // server -> client, about once a second and after every jump of the clock: the time of day in
@@ -143,6 +144,8 @@ namespace NetProtocol {
     Parade     = 4, // ActBack
     Finish     = 5, // ActKill: finishing move on an unconscious character
     Shoot      = 6, // ActForward with a bow or crossbow drawn: an arrow or bolt is fired (MP-17)
+    Invest     = 7, // ActForward with a spell drawn: the player starts charging a spell (MP-18)
+    Cast       = 8, // the spell is released: its projectile or effect is emitted (MP-18)
     };
 
   // player -> server -> other players, reliable: a player's character has started an attack.
@@ -156,8 +159,13 @@ namespace NetProtocol {
     uint32_t    time     = 0;   // sender's session clock in ms, the clock of PlayerState::time
     uint32_t    target   = 0;   // entity id of the character aimed at, 0: none
     AttackMove  move     = AttackMove::Swing;
-    float       dx = 0, dy = 0, dz = 0; // Shoot: initial velocity of the arrow; 0,0,0 otherwise
+    float       dx = 0, dy = 0, dz = 0; // Shoot, Cast: initial velocity of the arrow or spell projectile; 0,0,0 otherwise
+    uint32_t    spell    = 0;   // Invest, Cast: script symbol of the rune or scroll (never 0); 0 otherwise
+    uint8_t     level    = 0;   // Cast: level the spell was charged to, 1..MaxSpellLevel; 0 otherwise
     };
+
+  // highest level of a charged spell (Npc cast states CS_Emit_0..CS_Emit_Last)
+  constexpr uint8_t MaxSpellLevel = 16;
 
   // server -> client, reliable: a character with a network id was hit in the server's world.
   // The server alone deals damage; a client plays the effects and takes the hit points over.
@@ -179,6 +187,7 @@ namespace NetProtocol {
     int32_t     hp       = 0;   // hit points of the target after the hit, >= 0
     int32_t     damage   = 0;   // hit points taken, >= 0
     uint8_t     flags    = 0;   // Flag
+    int32_t     spell    = -1;  // spell id (C_ITEM::spell) of the spell that hit, -1: none (MP-18)
     };
 
   using Message = std::variant<Hello,Welcome,Reject,Chat,PlayerJoined,PlayerLeft,PlayerSpawn,PlayerState,WorldTime,

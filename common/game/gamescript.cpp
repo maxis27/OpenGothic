@@ -857,6 +857,10 @@ const AiState& GameScript::aiState(ScriptFn id) {
   return ins.first->second;
   }
 
+bool GameScript::isSpellId(int32_t splId) const {
+  return splId>=0 && uint32_t(splId)<spellFxInstanceNames->count();
+  }
+
 const zenkit::ISpell& GameScript::spellDesc(int32_t splId) {
   auto& tag = spellFxInstanceNames->get_string(uint16_t(splId));
   return spells->find(tag);

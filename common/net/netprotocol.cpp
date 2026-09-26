@@ -132,6 +132,7 @@ void write(Writer& w, const PlayerState& m) {
   w.u8 (m.weaponState);
   w.u32(m.meleeWeapon);
   w.u32(m.rangedWeapon);
+  w.u32(m.spell);
   }
 
 void write(Writer& w, const WorldTime& m) {
@@ -149,6 +150,8 @@ void write(Writer& w, const PlayerAttack& m) {
   w.f32(m.dx);
   w.f32(m.dy);
   w.f32(m.dz);
+  w.u32(m.spell);
+  w.u8 (m.level);
   }
 
 void write(Writer& w, const Hit& m) {
@@ -158,6 +161,7 @@ void write(Writer& w, const Hit& m) {
   w.u32(uint32_t(m.hp));
   w.u32(uint32_t(m.damage));
   w.u8 (m.flags);
+  w.u32(uint32_t(m.spell));
   }
 
 std::optional<Message> readHello(Reader& r) {
@@ -224,7 +228,7 @@ std::optional<Message> readPlayerState(Reader& r) {
   if(!r.u32(m.playerId) || !r.u32(m.entityId) || m.entityId==0 || !r.u32(m.seq) || !r.u32(m.time) ||
      !r.f32(m.x) || !r.f32(m.y) || !r.f32(m.z) || !r.f32(m.rotation) ||
      !r.u32(m.bodyState) || !r.u16(m.anim) || !r.u8(m.walkMode) || !r.u8(m.weaponState) ||
-     !r.u32(m.meleeWeapon) || !r.u32(m.rangedWeapon) || !r.atEnd())
+     !r.u32(m.meleeWeapon) || !r.u32(m.rangedWeapon) || !r.u32(m.spell) || !r.atEnd())
     return std::nullopt;
   return m;
   }
@@ -240,24 +244,30 @@ std::optional<Message> readPlayerAttack(Reader& r) {
   PlayerAttack m;
   uint8_t      move = 0;
   if(!r.u32(m.playerId) || !r.u32(m.entityId) || m.entityId==0 || !r.u32(m.time) || !r.u32(m.target) ||
-     !r.u8(move) || move<uint8_t(AttackMove::Swing) || move>uint8_t(AttackMove::Shoot) ||
-     !r.f32(m.dx) || !r.f32(m.dy) || !r.f32(m.dz) || !r.atEnd())
+     !r.u8(move) || move<uint8_t(AttackMove::Swing) || move>uint8_t(AttackMove::Cast) ||
+     !r.f32(m.dx) || !r.f32(m.dy) || !r.f32(m.dz) || !r.u32(m.spell) || !r.u8(m.level) || !r.atEnd())
     return std::nullopt;
   m.move = AttackMove(move);
+  const bool spell = m.move==AttackMove::Invest || m.move==AttackMove::Cast;
+  if(spell!=(m.spell!=0))
+    return std::nullopt;
+  if(m.move==AttackMove::Cast ? (m.level<1 || m.level>MaxSpellLevel) : m.level!=0)
+    return std::nullopt;
   return m;
   }
 
 std::optional<Message> readHit(Reader& r) {
   Hit      m;
-  uint32_t hp = 0, damage = 0;
+  uint32_t hp = 0, damage = 0, spell = 0;
   if(!r.u32(m.attacker) || !r.u32(m.target) || m.target==0 || !r.u32(hp) || !r.u32(damage) ||
-     !r.u8(m.flags) || (m.flags & ~Hit::AllFlags)!=0 || !r.atEnd())
+     !r.u8(m.flags) || (m.flags & ~Hit::AllFlags)!=0 || !r.u32(spell) || !r.atEnd())
     return std::nullopt;
   if((m.flags & Hit::Dead) && (m.flags & Hit::Unconscious))
     return std::nullopt;
   m.hp     = int32_t(hp);
   m.damage = int32_t(damage);
-  if(m.hp<0 || m.damage<0)
+  m.spell  = int32_t(spell);
+  if(m.hp<0 || m.damage<0 || m.spell<-1)
     return std::nullopt;
   return m;
   }
