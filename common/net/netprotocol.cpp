@@ -114,6 +114,22 @@ void write(Writer& w, const PlayerSpawn& m) {
   w.f32(m.rotation);
   }
 
+void write(Writer& w, const PlayerState& m) {
+  w.u8 (uint8_t(MsgType::PlayerState));
+  w.u32(m.playerId);
+  w.u32(m.entityId);
+  w.u32(m.seq);
+  w.u32(m.time);
+  w.f32(m.x);
+  w.f32(m.y);
+  w.f32(m.z);
+  w.f32(m.rotation);
+  w.u32(m.bodyState);
+  w.u16(m.anim);
+  w.u8 (m.walkMode);
+  w.u8 (m.weaponState);
+  }
+
 std::optional<Message> readHello(Reader& r) {
   Hello    m;
   uint32_t magic = 0;
@@ -172,6 +188,15 @@ std::optional<Message> readPlayerSpawn(Reader& r) {
   return m;
   }
 
+std::optional<Message> readPlayerState(Reader& r) {
+  PlayerState m;
+  if(!r.u32(m.playerId) || !r.u32(m.entityId) || m.entityId==0 || !r.u32(m.seq) || !r.u32(m.time) ||
+     !r.f32(m.x) || !r.f32(m.y) || !r.f32(m.z) || !r.f32(m.rotation) ||
+     !r.u32(m.bodyState) || !r.u16(m.anim) || !r.u8(m.walkMode) || !r.u8(m.weaponState) || !r.atEnd())
+    return std::nullopt;
+  return m;
+  }
+
 bool isValidName(const std::string& name) {
   if(name.empty() || name.size()>MaxNameLength)
     return false;
@@ -202,6 +227,7 @@ std::optional<Message> NetProtocol::decode(const uint8_t* data, size_t size) {
     case MsgType::PlayerJoined: return readPlayerJoined(r);
     case MsgType::PlayerLeft:   return readPlayerLeft(r);
     case MsgType::PlayerSpawn:  return readPlayerSpawn(r);
+    case MsgType::PlayerState:  return readPlayerState(r);
     }
   return std::nullopt;
   }

@@ -170,6 +170,8 @@ class Npc final {
     void       setScale      (float x,float y,float z);
 
     bool       setAnim(Anim a);
+    // last animation started through setAnim/setAnimAngGet, for multiplayer
+    Anim       lastAnim() const { return lastAnimStarted; }
     auto       setAnimAngGet(Anim a) -> const Animation::Sequence*;
     auto       setAnimAngGet(Anim a, uint8_t comb) -> const Animation::Sequence*;
     void       setAnimRotate(int rot);
@@ -560,6 +562,7 @@ class Npc final {
     DynamicWorld::NpcItem          physic;
 
     WalkBit                        wlkMode                 =WalkBit::WM_Run;
+    Anim                           lastAnimStarted         =Anim::NoAnim;
     int32_t                        trGuild                 =GIL_NONE;
     int32_t                        talentsSk[TALENT_MAX_G2]={};
     int32_t                        talentsVl[TALENT_MAX_G2]={};

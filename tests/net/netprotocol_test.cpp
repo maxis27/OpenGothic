@@ -72,6 +72,18 @@ void testEncoding() {
   auto noIdSpawn = encode(PlayerSpawn{4, 0, 0, 0, 0, 0});
   check(!decode(noIdSpawn.data(), noIdSpawn.size()), "PlayerSpawn without entity id is refused");
 
+  auto state = roundTrip(PlayerState{4, 17, 0xFFFFFFF0u, 123456, -1.f, 2.5f, 3e5f, 90.f, 0x18003, 2, 1, 3}, s);
+  check(state!=nullptr && state->playerId==4 && state->entityId==17 && state->seq==0xFFFFFFF0u &&
+        state->time==123456 && state->x==-1.f && state->y==2.5f && state->z==3e5f && state->rotation==90.f &&
+        state->bodyState==0x18003 && state->anim==2 && state->walkMode==1 && state->weaponState==3,
+        "PlayerState round trip");
+  auto infState = encode(PlayerState{4, 17, 1, 0, 0, 0, 0, std::numeric_limits<float>::infinity()});
+  check(!decode(infState.data(), infState.size()), "PlayerState with infinite rotation is refused");
+  auto noIdState = encode(PlayerState{4, 0, 1});
+  check(!decode(noIdState.data(), noIdState.size()), "PlayerState without entity id is refused");
+  auto cutState = encode(PlayerState{4, 17, 1});
+  check(!decode(cutState.data(), cutState.size()-1), "truncated PlayerState is refused");
+
   // too long strings are cut on encode
   auto longChat = roundTrip(Chat{1, std::string(MaxChatLength+100, 'a')}, s);
   check(longChat!=nullptr && longChat->text.size()==MaxChatLength, "Chat text is limited");

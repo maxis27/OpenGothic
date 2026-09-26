@@ -76,6 +76,48 @@ void NetSession::setAvatar(const Avatar& a) {
   sendOthers(NetTransport::InvalidPeer, a);
   }
 
+bool NetSession::sendPlayerState(const PlayerState& s) {
+  const uint64_t now = nowMs();
+  if(st!=State::Online || s.entityId==0 || (stateSeq!=0 && now-stateSent<StateIntervalMs))
+    return false;
+  PlayerState msg = s;
+  msg.playerId = self;
+  msg.seq      = ++stateSeq;
+  msg.time     = uint32_t(now-startTime);
+  stateSent    = now;
+  // lost states aren't resent: the next one replaces them anyway
+  if(server)
+    sendOthers(NetTransport::InvalidPeer, msg, NetTransport::Unreliable); else
+    send(hostPeer, msg, NetTransport::Unreliable);
+  return true;
+  }
+
+auto NetSession::playerState(PlayerId id) const -> const PlayerState* {
+  auto it = states.find(id);
+  if(it==states.end())
+    return nullptr;
+  return &it->second;
+  }
+
+void NetSession::onPlayerState(PlayerId from, PlayerState s, NetTransport::PeerId peer) {
+  if(from==self || players.count(from)==0)
+    return;
+  s.playerId = from;
+  auto it = states.find(from);
+  // the unreliable channel may reorder, and the host relays: keep only newer states
+  if(it!=states.end() && int32_t(s.seq - it->second.seq)<=0)
+    return;
+  states[from] = s;
+  if(server)
+    sendOthers(peer, s, NetTransport::Unreliable);
+  }
+
+void NetSession::forgetPlayer(PlayerId id) {
+  players.erase(id);
+  avatars.erase(id);
+  states .erase(id);
+  }
+
 void NetSession::poll(uint32_t timeoutMs) {
   if(st==State::Closed)
     return;
@@ -117,8 +159,7 @@ void NetSession::hostEvent(const NetTransport::Event& e) {
       if(id==NoPlayer)
         return;
       notify(std::string(playerName(id)) + " left the game");
-      players.erase(id);
-      avatars.erase(id);
+      forgetPlayer(id);
       sendOthers(e.peer, PlayerLeft{id});
       return;
       }
@@ -141,6 +182,10 @@ void NetSession::hostEvent(const NetTransport::Event& e) {
     if(auto hello = std::get_if<Hello>(&*msg))
       onHello(e.peer, *hello);
     return; // nothing else before the handshake
+    }
+  if(auto state = std::get_if<PlayerState>(&*msg)) {
+    onPlayerState(from, *state, e.peer);
+    return;
     }
   if(auto chat = std::get_if<Chat>(&*msg)) {
     const std::string line = sanitize(chat->text);
@@ -192,6 +237,7 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
       st = State::Closed;
       players.clear();
       avatars.clear();
+      states.clear();
       return;
     case NetTransport::EventType::Receive:
       break;
@@ -206,6 +252,7 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
     st = State::Closed;
     players.clear();
     avatars.clear();
+    states.clear();
     return;
     }
   if(auto m = std::get_if<Welcome>(&*msg)) {
@@ -226,13 +273,17 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
   if(auto m = std::get_if<PlayerLeft>(&*msg)) {
     if(st==State::Online && players.count(m->playerId))
       notify(std::string(playerName(m->playerId)) + " left the game");
-    players.erase(m->playerId);
-    avatars.erase(m->playerId);
+    forgetPlayer(m->playerId);
     return;
     }
   if(auto m = std::get_if<PlayerSpawn>(&*msg)) {
     if(st==State::Online && players.count(m->playerId))
       avatars[m->playerId] = *m;
+    return;
+    }
+  if(auto m = std::get_if<PlayerState>(&*msg)) {
+    if(st==State::Online)
+      onPlayerState(m->playerId, *m, hostPeer);
     return;
     }
   if(auto m = std::get_if<Chat>(&*msg)) {
@@ -242,16 +293,16 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
     }
   }
 
-void NetSession::send(NetTransport::PeerId peer, const Message& msg) {
+void NetSession::send(NetTransport::PeerId peer, const Message& msg, NetTransport::Channel ch) {
   auto pkg = encode(msg);
-  net.send(peer, NetTransport::Reliable, pkg.data(), pkg.size());
+  net.send(peer, ch, pkg.data(), pkg.size());
   }
 
-void NetSession::sendOthers(NetTransport::PeerId except, const Message& msg) {
+void NetSession::sendOthers(NetTransport::PeerId except, const Message& msg, NetTransport::Channel ch) {
   auto pkg = encode(msg);
   for(auto& [peer,id]:peers)
     if(peer!=except && id!=NoPlayer)
-      net.send(peer, NetTransport::Reliable, pkg.data(), pkg.size());
+      net.send(peer, ch, pkg.data(), pkg.size());
   }
 
 void NetSession::notify(const std::string& text) {

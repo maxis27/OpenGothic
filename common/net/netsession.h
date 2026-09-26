@@ -12,7 +12,7 @@
 #include "nettransport.h"
 
 // Multiplayer session on top of NetTransport and NetProtocol: the handshake, the list of
-// players, their characters in the host's world and chat. The host is a player too
+// players, their characters in the host's world, their movement and chat. The host is a player too
 // (id HostPlayer) and relays chat between clients.
 // Independent of the game itself; poll() must be called regularly (every frame) from one thread.
 class NetSession final {
@@ -53,6 +53,17 @@ class NetSession final {
     // after Welcome. Ignored on a client and for players not in the session.
     void     setAvatar(const Avatar& a);
 
+    // Movement of the players' characters. Every player moves its own character and sends
+    // its state; the host relays the states of each player to the others.
+    using PlayerState = NetProtocol::PlayerState;
+    // at most this often a player's state is sent (20 Hz)
+    static constexpr uint64_t StateIntervalMs = 50;
+    // Sends the state of this player's character (playerId, seq and time are filled in here)
+    // when StateIntervalMs have passed since the last one; false when not sent.
+    bool     sendPlayerState(const PlayerState& s);
+    // Latest state received from another player, nullptr when none yet.
+    auto     playerState(PlayerId id) const -> const PlayerState*;
+
     // Service the network: handshake, chat, players joining and leaving.
     void     poll(uint32_t timeoutMs = 0);
     // Send a chat line to the other players; false when offline or the text is empty.
@@ -70,8 +81,13 @@ class NetSession final {
     void     onHello    (NetTransport::PeerId peer, const NetProtocol::Hello& hello);
     void     reject     (NetTransport::PeerId peer, const NetProtocol::Reject& r);
 
-    void     send       (NetTransport::PeerId peer, const NetProtocol::Message& msg);
-    void     sendOthers (NetTransport::PeerId except, const NetProtocol::Message& msg);
+    void     onPlayerState(PlayerId from, NetProtocol::PlayerState s, NetTransport::PeerId peer);
+    void     forgetPlayer (PlayerId id);
+
+    void     send       (NetTransport::PeerId peer, const NetProtocol::Message& msg,
+                         NetTransport::Channel ch = NetTransport::Reliable);
+    void     sendOthers (NetTransport::PeerId except, const NetProtocol::Message& msg,
+                         NetTransport::Channel ch = NetTransport::Reliable);
     void     notify     (const std::string& text);
     void     chatLine   (PlayerId from, std::string_view text);
 
@@ -85,6 +101,9 @@ class NetSession final {
 
     std::map<PlayerId,std::string>                   players;
     std::map<PlayerId,Avatar>                        avatars;
+    std::map<PlayerId,PlayerState>                   states;
+    uint32_t                                         stateSeq  = 0;
+    uint64_t                                         stateSent = 0;
     // host: player of each connected peer, NoPlayer until its Hello is accepted
     std::unordered_map<NetTransport::PeerId,PlayerId> peers;
     PlayerId                                         nextPlayer = HostPlayer+1;
