@@ -2350,7 +2350,7 @@ void Npc::tick(uint64_t dt) {
     setAnim(AnimationSolver::Idle);
 
   if(aiPolicy==NpcProcessPolicy::NetProxy) {
-    mvAlgo.tick(dt);
+    // the network moves it (NetWorldSync), MoveAlgo would add the animation's own motion on top
     return;
     }
 

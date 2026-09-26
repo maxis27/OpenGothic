@@ -226,12 +226,15 @@ if(OPENGOTHIC_BUILD_TESTS)
   target_link_libraries(NetSessionTest PRIVATE enet)
   # entity registry: NetEntityId <-> Npc*/Item*
   add_executable(NetEntityTest tests/net/netentity_test.cpp common/net/netentity.cpp)
+  # interpolation of the replicated players' movement
+  add_executable(NetInterpolatorTest tests/net/netinterpolator_test.cpp common/net/netinterpolator.cpp)
   if(NOT MSVC)
     target_compile_options(NetTransportTest PRIVATE -Wall -Wconversion -Werror)
     target_compile_options(NetProtocolTest  PRIVATE -Wall -Wconversion -Werror)
     target_compile_options(NetAddressTest   PRIVATE -Wall -Wconversion -Werror)
     target_compile_options(NetSessionTest   PRIVATE -Wall -Wconversion -Werror)
     target_compile_options(NetEntityTest    PRIVATE -Wall -Wconversion -Werror)
+    target_compile_options(NetInterpolatorTest PRIVATE -Wall -Wconversion -Werror)
   endif()
 
   enable_testing()
@@ -242,6 +245,7 @@ if(OPENGOTHIC_BUILD_TESTS)
   add_test(NAME NetAddress  COMMAND NetAddressTest)
   add_test(NAME NetSession  COMMAND NetSessionTest 47613)
   add_test(NAME NetEntity   COMMAND NetEntityTest)
+  add_test(NAME NetInterpolator COMMAND NetInterpolatorTest)
 endif()
 
 # installation

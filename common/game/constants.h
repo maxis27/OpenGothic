@@ -509,7 +509,7 @@ enum class NpcProcessPolicy : uint8_t {
   AiNormal,
   AiFar,
   AiFar2,
-  NetProxy, // replicated from network: animation and visual only, no AI, perceptions or regeneration
+  NetProxy, // replicated from network: animation and visual only, no AI, perceptions, regeneration or movement of its own
   };
 
 enum AiStateCode : int32_t {

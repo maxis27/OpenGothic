@@ -13,6 +13,7 @@
 #include "graphics/meshobjects.h"
 #include "game/gamescript.h"
 #include "physics/dynamicworld.h"
+#include "net/netinterpolator.h"
 #include "worldobjects.h"
 #include "worldsound.h"
 #include "waypoint.h"
@@ -113,10 +114,13 @@ class World final {
     // Characters of the other players of a multiplayer session; player() stays the local one.
     // Kept in sync with the session by NetWorldSync.
     struct RemotePlayer final {
-      uint32_t playerId = 0;
-      Npc*     npc      = nullptr;
+      uint32_t        playerId = 0;
+      Npc*            npc      = nullptr;
+      NetInterpolator motion;          // states received for npc, played back smoothly
+      uint16_t        anim     = 0;    // AnimationSolver::Anim of the last state played back
       };
     auto                 remotePlayers() const -> const std::vector<RemotePlayer>& { return remotePl; }
+    auto                 remotePlayers()       -> std::vector<RemotePlayer>&       { return remotePl; }
     Npc*                 remotePlayer(uint32_t playerId) const;
     // Spawns the default player character (PC_HERO) as a NetProxy npc, or returns the existing one.
     Npc*                 addRemotePlayer(uint32_t playerId, std::string_view name, const Tempest::Vec3& pos, float rotation);
