@@ -691,6 +691,27 @@ bool World::isRemotePlayer(const Npc& npc) const {
   return false;
   }
 
+Npc* World::nearestPlayer(const Npc& npc, bool preferUp) const {
+  Npc*  ret    = nullptr;
+  float dist   = 0;
+  bool  retUp  = false;
+  auto  test   = [&](Npc* pl) {
+    if(pl==nullptr || pl==&npc)
+      return;
+    const bool  up = !preferUp || !pl->isDown();
+    const float d  = pl->qDistTo(npc);
+    if(ret==nullptr || (up && !retUp) || (up==retUp && d<dist)) {
+      ret   = pl;
+      dist  = d;
+      retUp = up;
+      }
+    };
+  test(npcPlayer);
+  for(auto& r:remotePl)
+    test(r.npc);
+  return ret;
+  }
+
 void World::addNetHit(const NetProtocol::Hit& hit) {
   if(netHits.size()<MaxNetHits)
     netHits.push_back(hit);
