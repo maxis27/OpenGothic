@@ -182,8 +182,7 @@ void sendAttacks(NetSession& session, World& world) {
   NetSession::PlayerAttack a;
   a.entityId = id.value;
   a.move     = *mv;
-  if(auto t = pl.target())
-    a.target = ids.id(*t).value;
+  a.target   = pl.lastAttackTarget();
   session.sendAttack(a);
   }
 

@@ -3940,6 +3940,7 @@ bool Npc::doAttack(Anim anim, BodyState bs) {
     (void)sq;
     ++attacksStarted;
     lastAttackStarted = anim;
+    lastAttackTargetId = currentTarget!=nullptr ? owner.netEntities().id(*currentTarget).value : 0;
     // implAniWait(uint64_t(sq->atkTotalTime(visual.comboLength())+1));
     return true;
     }
@@ -3962,6 +3963,7 @@ bool Npc::blockFist() {
   if(!again) {
     ++attacksStarted;
     lastAttackStarted = Anim::AttackBlock;
+    lastAttackTargetId = currentTarget!=nullptr ? owner.netEntities().id(*currentTarget).value : 0;
     }
   return true;
   }
