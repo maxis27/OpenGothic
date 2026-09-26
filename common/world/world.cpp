@@ -401,6 +401,15 @@ void World::setDayTime(int32_t h, int32_t min) {
   wobj.resetPositionToTA();
   }
 
+void World::setTime(gtime t) {
+  const int64_t diff = t.toInt()-game.time().toInt();
+  game.setTime(t);
+  // a small correction keeps everyone where they are; a jump (joining, the host slept)
+  // sends them to their routines like setDayTime does
+  if(diff>=gtime(1,0).toInt() || diff<=-gtime(1,0).toInt())
+    wobj.resetPositionToTA();
+  }
+
 gtime World::time() const {
   return game.time();
   }

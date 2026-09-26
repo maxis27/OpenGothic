@@ -10,6 +10,7 @@ class World;
 //    characters are spawned where the host has them;
 //  - every player sends the state of its own character (NetSession::sendPlayerState) and
 //    plays back the states received for the other players' characters (NetInterpolator);
+//  - the host sends the time of day of its world, the clients take it over (MP-12);
 //  - characters of players who left are removed, all of them once the session is gone.
 // Called every frame. A newly loaded world has no remote players yet and is filled again.
 namespace NetWorldSync {

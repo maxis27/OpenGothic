@@ -91,6 +91,16 @@ void sendState(NetSession& session, World& world) {
   session.sendPlayerState(s);
   }
 
+// the host owns the clock of the world, the clients take it over
+void syncTime(NetSession& session, World& world) {
+  if(session.isHost()) {
+    session.setWorldTime(world.time().toInt());
+    return;
+    }
+  if(auto t = session.takeWorldTime())
+    world.setTime(gtime::fromInt(*t));
+  }
+
 // turning speed is measured over this long, ms
 constexpr uint64_t TurnWindow = 100;
 
@@ -188,6 +198,7 @@ void NetWorldSync::tick(NetSession* session, World& world) {
   if(session->isHost())
     tickHost(*session, world); else
     tickClient(*session, world);
+  syncTime (*session, world);
   sendState(*session, world);
   applyStates(*session, world);
   }

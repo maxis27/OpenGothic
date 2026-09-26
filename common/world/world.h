@@ -134,6 +134,8 @@ class World final {
     void                 tick(uint64_t dt);
     uint64_t             tickCount() const;
     void                 setDayTime(int32_t h,int32_t min);
+    // multiplayer client: takes the host's clock over (see NetWorldSync)
+    void                 setTime(gtime t);
     gtime                time() const;
 
     Focus                validateFocus(const Focus& def);

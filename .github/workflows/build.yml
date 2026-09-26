@@ -61,7 +61,7 @@ jobs:
 
       - name: Test
         run: |
-          cmake --build build --target NetTransportTest NetProtocolTest NetAddressTest NetSessionTest NetEntityTest -j $(nproc)
+          cmake --build build --target NetTransportTest NetProtocolTest NetAddressTest NetSessionTest NetEntityTest NetInterpolatorTest -j $(nproc)
           ctest --test-dir build --output-on-failure
 
       - name: Upload artifact

@@ -19,7 +19,7 @@
 namespace NetProtocol {
 
   // bump on every incompatible change of any message
-  constexpr uint16_t Version = 4;
+  constexpr uint16_t Version = 5;
   // "OGMP", identifies OpenGothic multiplayer traffic
   constexpr uint32_t Magic   = 0x504D474F;
 
@@ -40,6 +40,7 @@ namespace NetProtocol {
     PlayerLeft   = 6,
     PlayerSpawn  = 7,
     PlayerState  = 8,
+    WorldTime    = 9,
     };
 
   enum class RejectReason : uint8_t {
@@ -116,7 +117,14 @@ namespace NetProtocol {
     uint8_t     weaponState = 0;   // WeaponState
     };
 
-  using Message = std::variant<Hello,Welcome,Reject,Chat,PlayerJoined,PlayerLeft,PlayerSpawn,PlayerState>;
+  // server -> client, about once a second and after every jump of the clock: the time of day in
+  // the server's world (gtime::toInt(), game milliseconds since day 0, 0:00). Clients keep their
+  // clock running in between but always take this one over (MP-12).
+  struct WorldTime {
+    int64_t     time = 0;      // never negative
+    };
+
+  using Message = std::variant<Hello,Welcome,Reject,Chat,PlayerJoined,PlayerLeft,PlayerSpawn,PlayerState,WorldTime>;
 
   std::vector<uint8_t> encode(const Message& msg);
   // Returns nothing for truncated, oversized or unknown packets.

@@ -2,6 +2,7 @@
 
 #include <bit>
 #include <cmath>
+#include <limits>
 
 using namespace NetProtocol;
 
@@ -130,6 +131,11 @@ void write(Writer& w, const PlayerState& m) {
   w.u8 (m.weaponState);
   }
 
+void write(Writer& w, const WorldTime& m) {
+  w.u8 (uint8_t(MsgType::WorldTime));
+  w.u64(uint64_t(m.time));
+  }
+
 std::optional<Message> readHello(Reader& r) {
   Hello    m;
   uint32_t magic = 0;
@@ -197,6 +203,13 @@ std::optional<Message> readPlayerState(Reader& r) {
   return m;
   }
 
+std::optional<Message> readWorldTime(Reader& r) {
+  uint64_t time = 0;
+  if(!r.u64(time) || time>uint64_t(std::numeric_limits<int64_t>::max()) || !r.atEnd())
+    return std::nullopt;
+  return WorldTime{int64_t(time)};
+  }
+
 bool isValidName(const std::string& name) {
   if(name.empty() || name.size()>MaxNameLength)
     return false;
@@ -228,6 +241,7 @@ std::optional<Message> NetProtocol::decode(const uint8_t* data, size_t size) {
     case MsgType::PlayerLeft:   return readPlayerLeft(r);
     case MsgType::PlayerSpawn:  return readPlayerSpawn(r);
     case MsgType::PlayerState:  return readPlayerState(r);
+    case MsgType::WorldTime:    return readWorldTime(r);
     }
   return std::nullopt;
   }
