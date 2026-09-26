@@ -597,8 +597,11 @@ bool Npc::checkHealth(bool onChange, bool allowUnconscious) {
 
 void Npc::onNoHealth(bool death, HitSound sndMask) {
   invent.switchActiveWeapon(*this,Item::NSLOT);
-  visual.dropWeapon(*this);
-  visual.dropShield(*this);
+  if(!isNetPlayer()) {
+    // a player's character keeps its weapons: items on the ground aren't shared yet (MP-22)
+    visual.dropWeapon(*this);
+    visual.dropShield(*this);
+    }
   dropTorch();
   visual.setToFightMode(WeaponState::NoWeapon);
   updateWeaponSkeleton();
@@ -2168,15 +2171,60 @@ void Npc::takeNetHit(Npc* other, const NetProtocol::Hit& hit) {
     }
 
   // the host's hit points win, also over what the client has regenerated or lost on its own
-  const int32_t hp = attribute(ATR_HITPOINTS);
-  if(hit.hp!=hp) {
-    if(other!=nullptr)
-      currentOther = other;
-    changeAttribute(ATR_HITPOINTS,hit.hp-hp,(hit.flags & NetHit::DontKill)!=0);
+  if(!isDead()) {
+    const int32_t hp = std::clamp(hit.hp,0,std::max(hnpc->attribute[ATR_HITPOINTSMAX],1));
+    if(hp<hnpc->attribute[ATR_HITPOINTS])
+      invent.invalidateCond(*this);
+    hnpc->attribute[ATR_HITPOINTS] = hp;
     }
+  // and so does its verdict: the client doesn't decide on its own whether the character dies (checkHealth)
+  if(hit.flags & NetHit::Dead)
+    netDown(true,other);
+  else if(hit.flags & NetHit::Unconscious)
+    netDown(false,other);
 
-  if(hit.flags & NetHit::Scream)
+  if((hit.flags & NetHit::Scream) && !isDown())
     emitSoundSVM("SVM_%d_AARGH");
+  }
+
+void Npc::netDown(bool death, Npc* other) {
+  if(isDead() || (!death && isUnconscious()))
+    return;
+  if(other!=nullptr)
+    lastHit = other;
+  hnpc->attribute[ATR_HITPOINTS] = 0;
+  onNoHealth(death,HS_Dead);
+  }
+
+void Npc::netStandUp() {
+  if(!isUnconscious())
+    return;
+  // like AI_StandUp at the end of ZS_Unconscious, without the rest of the script
+  clearState(true);
+  if(!setAnim(Anim::Idle)) {
+    setAnim(Anim::NoAnim);
+    setAnim(Anim::Idle);
+    }
+  }
+
+void Npc::netRespawn(const Vec3& pos, float rotation) {
+  if(isDown())
+    clearState(true);
+  clearAiQueue();
+  hnpc->attribute[ATR_HITPOINTS] = hnpc->attribute[ATR_HITPOINTSMAX];
+  lastHit       = nullptr;
+  currentOther  = nullptr;
+  currentTarget = nullptr;
+  physic.setEnable(true);
+  setPosition(pos);
+  setDirection(rotation);
+  setAnim(Anim::NoAnim); // out of the pose of the dead
+  setAnim(Anim::Idle);
+  updateTransform();
+  }
+
+bool Npc::isNetPlayer() const {
+  return Gothic::inst().isMultiplayer() && (isPlayer() || aiPolicy==NpcProcessPolicy::NetProxy);
   }
 
 bool Npc::isNetHit(const Npc& other) {
@@ -2190,6 +2238,10 @@ void Npc::reportNetHit(Npc& other, int32_t hpBefore, uint8_t flags) {
   if(!id || Gothic::inst().isNetClient())
     return;
   NetProtocol::Hit hit;
+  if(isDead())
+    flags = uint8_t(flags | NetProtocol::Hit::Dead);
+  else if(isUnconscious())
+    flags = uint8_t(flags | NetProtocol::Hit::Unconscious);
   hit.attacker = ids.id(other).value;
   hit.target   = id.value;
   hit.hp       = std::max(attribute(ATR_HITPOINTS),0);

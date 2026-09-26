@@ -9,6 +9,7 @@
 //    WorldTimeIntervalMs unless the clock has jumped;
 //  - attacks reach every other player (through the host), only with the sender's own character;
 //    the host's hits reach every client;
+//  - a respawned character reaches every client as a respawn, a newcomer gets it as a plain one;
 //  - a client leaving is announced to the others.
 // Usage: NetSessionTest <port>. Exits with 0 on success.
 
@@ -274,6 +275,32 @@ void testSession(uint16_t port) {
         diegoHits[0].damage==20 && diegoHits[0].flags==(NetSession::Hit::Effect|NetSession::Hit::Stumble),
         "a hit arrives intact");
   check(host.session->takeHits().empty(), "the host takes no hits from anyone");
+
+  // respawn: reaches every client once, a newcomer gets the character without the flag
+  host.session->setAvatar({diegoId, 16, 1, 2, 3, 45, NetSession::Avatar::Respawn});
+  std::vector<NetSession::Avatar> diegoResp, miltenResp;
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    for(auto& a:diego.session->takeRespawns())  diegoResp.push_back(a);
+    for(auto& a:milten.session->takeRespawns()) miltenResp.push_back(a);
+    return !diegoResp.empty() && !miltenResp.empty();
+    });
+  check(ok, "a respawn reaches every client");
+  check(diegoResp.size()==1 && diegoResp[0].playerId==diegoId && diegoResp[0].entityId==16 && diegoResp[0].rotation==45 &&
+        diegoResp[0].flags==NetSession::Avatar::Respawn && diego.session->avatar(diegoId)->entityId==16,
+        "a respawn arrives intact and replaces the character");
+  check(host.session->takeRespawns().empty(), "the host takes no respawns");
+
+  Player gorn;
+  gorn.session = NetSession::connect("127.0.0.1", port, "Gorn");
+  gorn.attach("Gorn");
+  ok = runUntil({&host,&diego,&milten,&gorn}, [&]{
+    return gorn.session->avatar(diegoId)!=nullptr;
+    });
+  check(ok && gorn.session->avatar(diegoId)->entityId==16 && gorn.session->avatar(diegoId)->flags==0 &&
+        gorn.session->takeRespawns().empty(), "a newcomer gets a respawned character as a plain one");
+  gorn.session.reset();
+  ok = runUntil({&host,&diego,&milten}, [&]{ return diego.saw("Gorn left the game"); });
+  check(ok, "the newcomer leaves again");
 
   // leaving
   const auto miltenId = milten.session->playerId();

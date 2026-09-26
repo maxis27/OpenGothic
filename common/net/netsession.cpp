@@ -155,6 +155,10 @@ auto NetSession::takeHits() -> std::vector<Hit> {
   return std::exchange(hits, {});
   }
 
+auto NetSession::takeRespawns() -> std::vector<Avatar> {
+  return std::exchange(respawns, {});
+  }
+
 void NetSession::setWorldTime(int64_t time) {
   if(!server || time<0)
     return;
@@ -276,8 +280,10 @@ void NetSession::onHello(NetTransport::PeerId peer, const Hello& hello) {
   for(auto& [pid,pname]:players)
     send(peer, PlayerJoined{pid, pname});
   send(peer, Welcome{id, world, nowMs()-startTime});
-  for(auto& [pid,a]:avatars)
-    send(peer, a);
+  for(auto a:avatars) {
+    a.second.flags &= uint8_t(~Avatar::Respawn); // a newcomer spawns the characters, alive anyway
+    send(peer, a.second);
+    }
   if(worldTime)
     send(peer, WorldTime{*worldTime});
   sendOthers(peer, PlayerJoined{id, hello.name});
@@ -309,6 +315,7 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
       states.clear();
       attacks.clear();
       hits.clear();
+      respawns.clear();
       return;
     case NetTransport::EventType::Receive:
       break;
@@ -326,6 +333,7 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
     states.clear();
     attacks.clear();
     hits.clear();
+    respawns.clear();
     return;
     }
   if(auto m = std::get_if<Welcome>(&*msg)) {
@@ -350,8 +358,11 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
     return;
     }
   if(auto m = std::get_if<PlayerSpawn>(&*msg)) {
-    if(st==State::Online && players.count(m->playerId))
-      avatars[m->playerId] = *m;
+    if(st!=State::Online || players.count(m->playerId)==0)
+      return;
+    avatars[m->playerId] = *m;
+    if((m->flags & Avatar::Respawn) && respawns.size()<MaxPending)
+      respawns.push_back(*m);
     return;
     }
   if(auto m = std::get_if<PlayerState>(&*msg)) {

@@ -64,9 +64,12 @@ void testEncoding() {
   auto left = roundTrip(PlayerLeft{4}, s);
   check(left!=nullptr && left->playerId==4, "PlayerLeft round trip");
 
-  auto spawn = roundTrip(PlayerSpawn{4, 17, 1.5f, -200.25f, 3e4f, 270.f}, s);
+  auto spawn = roundTrip(PlayerSpawn{4, 17, 1.5f, -200.25f, 3e4f, 270.f, PlayerSpawn::Respawn}, s);
   check(spawn!=nullptr && spawn->playerId==4 && spawn->entityId==17 && spawn->x==1.5f &&
-        spawn->y==-200.25f && spawn->z==3e4f && spawn->rotation==270.f, "PlayerSpawn round trip");
+        spawn->y==-200.25f && spawn->z==3e4f && spawn->rotation==270.f && spawn->flags==PlayerSpawn::Respawn,
+        "PlayerSpawn round trip");
+  auto badSpawn = encode(PlayerSpawn{4, 17, 0, 0, 0, 0, 0x02});
+  check(!decode(badSpawn.data(), badSpawn.size()), "PlayerSpawn with unknown flags is refused");
   auto nanSpawn = encode(PlayerSpawn{4, 17, std::numeric_limits<float>::quiet_NaN(), 0, 0, 0});
   check(!decode(nanSpawn.data(), nanSpawn.size()), "PlayerSpawn with NaN position is refused");
   auto noIdSpawn = encode(PlayerSpawn{4, 0, 0, 0, 0, 0});
@@ -110,8 +113,10 @@ void testEncoding() {
   check(!decode(noTargetHit.data(), noTargetHit.size()), "Hit without target is refused");
   auto negHit = encode(Hit{17, 21, -5, 1, 0});
   check(!decode(negHit.data(), negHit.size()), "Hit with negative hit points is refused");
-  auto badFlags = encode(Hit{17, 21, 1, 1, 0x80});
-  check(!decode(badFlags.data(), badFlags.size()), "Hit with unknown flags is refused");
+  auto dead = roundTrip(Hit{17, 21, 0, 3, Hit::Effect|Hit::Dead}, s);
+  check(dead!=nullptr && dead->hp==0 && dead->flags==(Hit::Effect|Hit::Dead), "Hit felling the target round trip");
+  auto badFlags = encode(Hit{17, 21, 0, 1, Hit::Dead|Hit::Unconscious});
+  check(!decode(badFlags.data(), badFlags.size()), "Hit leaving the target both dead and unconscious is refused");
   auto cutHit = encode(Hit{17, 21, 1, 1, 0});
   check(!decode(cutHit.data(), cutHit.size()-1), "truncated Hit is refused");
 

@@ -19,7 +19,7 @@
 namespace NetProtocol {
 
   // bump on every incompatible change of any message
-  constexpr uint16_t Version = 7;
+  constexpr uint16_t Version = 8;
   // "OGMP", identifies OpenGothic multiplayer traffic
   constexpr uint32_t Magic   = 0x504D474F;
 
@@ -93,12 +93,19 @@ namespace NetProtocol {
   // server -> client: the character of a player is in the server's world under network id
   // entityId (see NetEntityId), at position x,y,z turned by rotation (degrees, Npc::rotation()).
   // Sent when a character is spawned or respawned with a new id, and to a newcomer right after
-  // Welcome for every character already there. For its own player the client only takes over the id.
+  // Welcome for every character already there. For its own player the client only takes over the id,
+  // unless the character is respawned (MP-16).
   struct PlayerSpawn {
+    enum Flag : uint8_t {
+      Respawn  = 1<<0, // the character was dead and is back to life here, with full hit points and a new id;
+                       // never set in the ones a newcomer gets
+      AllFlags = (1<<1)-1,
+      };
     uint32_t    playerId = 0;
     uint32_t    entityId = 0;
     float       x = 0, y = 0, z = 0;
     float       rotation = 0;
+    uint8_t     flags    = 0;   // Flag
     };
 
   // player -> server -> other players, over the unreliable channel ~20 times a second: where a
@@ -158,7 +165,10 @@ namespace NetProtocol {
       StumbleB = 1<<3, // with the StumbleB animation instead of StumbleA
       DontKill = 1<<4, // at no hit points the target falls unconscious instead of dying
       Scream   = 1<<5, // the target cries out
-      AllFlags = (1<<6)-1,
+      // the state of the target after the hit (MP-16), at most one of them
+      Dead        = 1<<6, // dead
+      Unconscious = 1<<7, // fallen unconscious
+      AllFlags    = 0xFF,
       };
     uint32_t    attacker = 0;   // entity id, 0: none or unknown to the network
     uint32_t    target   = 0;   // entity id, never 0
