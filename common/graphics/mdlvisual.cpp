@@ -772,6 +772,14 @@ bool MdlVisual::startAnim(Npc &npc, WeaponState st) {
   return false;
   }
 
+const Animation::Sequence* MdlVisual::sequence(std::string_view name) const {
+  return solver.solveFrm(name);
+  }
+
+bool MdlVisual::startNetAnim(Npc& npc, const Animation::Sequence* sq, BodyState bs) {
+  return skInst->startAnim(solver,sq,0,bs,Pose::Force,npc.world().tickCount());
+  }
+
 void MdlVisual::setAnimRotate(Npc &npc, int dir) {
   skInst->setAnimRotate(solver,npc,fgtMode,AnimationSolver::TurnType::Std,dir);
   }

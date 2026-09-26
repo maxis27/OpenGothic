@@ -2229,6 +2229,88 @@ void Npc::netRespawn(const Vec3& pos, float rotation) {
   updateTransform();
   }
 
+void Npc::netAnims(std::vector<std::string>& out, size_t max, size_t maxLength) const {
+  out.clear();
+  auto& pose = visual.pose();
+  for(size_t i=0; i<pose.layerCount() && out.size()<max; ++i) {
+    auto& name = pose.layerSequence(i)->name;
+    if(!name.empty() && name.size()<=maxLength)
+      out.push_back(name);
+    }
+  }
+
+void Npc::netPlayAnims(const std::vector<std::string>& was, const std::vector<std::string>& now, BodyState bs) {
+  auto& pose = visual.pose();
+  // the weapon changes in an event of the animation (DEF_FIGHTMODE), but only drawWeaponMelee and the like put
+  // it in hand: such an animation of the host is played by switching the weapon the same way
+  auto fightMode = [](const Animation::Sequence& sq) {
+    if(sq.data!=nullptr)
+      for(auto& e:sq.data->events)
+        if(e.type==zenkit::MdsEventType::SET_FIGHT_MODE)
+          return e.fight_mode;
+    return zenkit::MdsFightMode::INVALID;
+    };
+  auto contains = [](const std::vector<std::string>& v, std::string_view n) {
+    return std::find(v.begin(), v.end(), n)!=v.end();
+    };
+
+  // layers the host has stopped, when nothing else plays there now (else starting that one replaces it)
+  for(auto& name:was) {
+    if(contains(now, name) || !pose.isInAnim(name))
+      continue;
+    auto sq = visual.sequence(name);
+    if(sq==nullptr || fightMode(*sq)!=zenkit::MdsFightMode::INVALID)
+      continue;
+    bool replaced = false;
+    for(auto& n:now)
+      if(auto nsq = visual.sequence(n); nsq!=nullptr && nsq->layer==sq->layer)
+        replaced = true;
+    if(!replaced)
+      visual.stopAnim(*this, name);
+    }
+
+  // item animations of the host (smoking, drinking, ...) aren't started by an item here: no item state to keep
+  if(bs==BS_ITEMINTERACT)
+    bs = BS_STAND;
+  bool lowest = true;
+  for(auto& name:now) {
+    const BodyState lbs = lowest ? bs : BS_NONE;
+    lowest = false;
+    if(contains(was, name) || pose.isInAnim(name))
+      continue;
+    auto sq = visual.sequence(name);
+    if(sq==nullptr)
+      continue; // a model without it, e.g. an overlay the scripts gave the host's copy only
+    switch(fightMode(*sq)) {
+      case zenkit::MdsFightMode::INVALID:
+        break;
+      case zenkit::MdsFightMode::NONE:
+        closeWeapon(false);
+        continue;
+      case zenkit::MdsFightMode::FIST:
+        drawWeaponFist();
+        continue;
+      case zenkit::MdsFightMode::SINGLE_HANDED:
+      case zenkit::MdsFightMode::DUAL_HANDED:
+        drawWeaponMelee();
+        continue;
+      case zenkit::MdsFightMode::BOW:
+      case zenkit::MdsFightMode::CROSSBOW:
+        drawWeaponBow();
+        continue;
+      case zenkit::MdsFightMode::MAGIC:
+        continue; // spells of npcs aren't replayed yet
+      }
+    // a transition playing here already goes on to it by itself
+    bool chained = false;
+    for(size_t i=0; i<pose.layerCount(); ++i)
+      if(pose.layerSequence(i)->next==name)
+        chained = true;
+    if(!chained)
+      visual.startNetAnim(*this, sq, lbs);
+    }
+  }
+
 bool Npc::isNetPlayer() const {
   // not every NetProxy npc: on a client the npcs of the host's world are NetProxy too (MP-19)
   return Gothic::inst().isMultiplayer() && (isPlayer() || owner.isRemotePlayer(*this));

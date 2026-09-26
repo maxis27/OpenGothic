@@ -157,6 +157,35 @@ void testEncoding() {
         ent->y==-2.f && ent->z==3.25f && ent->rotation==270.f && ent->hp==120 && ent->flags==0, "SpawnEntity round trip");
   auto deadEnt = roundTrip(Ent{21, EntityKind::Npc, 0x1234, 0, 0, 0, 0, 0, Ent::Dead}, s);
   check(deadEnt!=nullptr && deadEnt->flags==Ent::Dead && deadEnt->hp==0, "SpawnEntity of a dead npc round trip");
+  NpcStates ns;
+  ns.seq  = 9;
+  ns.time = 1234;
+  NpcState n1;
+  n1.entityId = 21; n1.x = 1; n1.y = -2; n1.z = 3; n1.rotation = 90; n1.bodyState = 5; n1.hp = 12;
+  n1.walkMode = 2; n1.weaponState = 3; n1.anims = {"S_SIT", "T_JOINT_RANDOM_1"};
+  NpcState n2;
+  n2.entityId = 22;
+  ns.npcs = {n1, n2};
+  auto states = roundTrip(ns, s);
+  check(states!=nullptr && states->seq==9 && states->time==1234 && states->npcs.size()==2, "NpcStates round trip");
+  if(states!=nullptr && states->npcs.size()==2) {
+    auto& a = states->npcs[0];
+    check(a.entityId==21 && a.seq==9 && a.time==1234 && a.x==1 && a.y==-2 && a.z==3 && a.rotation==90 &&
+          a.bodyState==5 && a.hp==12 && a.walkMode==2 && a.weaponState==3 && a.anims==n1.anims &&
+          states->npcs[1].anims.empty(), "NpcState round trip");
+    }
+  auto noIdNpc = ns;
+  noIdNpc.npcs[1].entityId = 0;
+  auto noIdNpcPkg = encode(noIdNpc);
+  check(!decode(noIdNpcPkg.data(), noIdNpcPkg.size()), "NpcState without entity id is refused");
+  auto emptyAnim = ns;
+  emptyAnim.npcs[0].anims = {""};
+  auto emptyAnimPkg = encode(emptyAnim);
+  check(!decode(emptyAnimPkg.data(), emptyAnimPkg.size()), "NpcState with an empty animation name is refused");
+  auto nanNpc = ns;
+  nanNpc.npcs[0].x = std::nanf("");
+  auto nanNpcPkg = encode(nanNpc);
+  check(!decode(nanNpcPkg.data(), nanNpcPkg.size()), "NpcState with a NaN position is refused");
   auto noIdEnt = encode(Ent{0, EntityKind::Npc, 0x1234});
   check(!decode(noIdEnt.data(), noIdEnt.size()), "SpawnEntity without entity id is refused");
   auto noInstEnt = encode(Ent{21, EntityKind::Npc, 0});

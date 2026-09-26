@@ -450,6 +450,12 @@ class Npc final {
     void      netStandUp();
     // multiplayer: a dead player's character is back to life at pos, with full hit points
     void      netRespawn(const Tempest::Vec3& pos, float rotation);
+    // multiplayer host: names of the animations playing, lowest layer first, at most max of at most maxLength
+    // (NetProtocol::NpcState::anims); longer names are left out
+    void      netAnims(std::vector<std::string>& out, size_t max, size_t maxLength) const;
+    // multiplayer client: the npc plays the animations the host's copy plays (MP-20), now after was. An animation
+    // drawing or putting away a weapon is played by drawWeaponMelee and the like, which put the weapon in hand too.
+    void      netPlayAnims(const std::vector<std::string>& was, const std::vector<std::string>& now, BodyState bs);
     // multiplayer: the character of a player (the local hero or another player's), not an npc
     bool      isNetPlayer() const;
     bool      isTargetableBySpell(TargetType t) const;

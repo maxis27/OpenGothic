@@ -18,12 +18,14 @@ float lerpAngle(float a, float b, float k) {
   return a + d*k;
   }
 
-float distance(const NetInterpolator::State& a, const NetInterpolator::State& b) {
+template<class State>
+float distance(const State& a, const State& b) {
   const float dx = b.x-a.x, dy = b.y-a.y, dz = b.z-a.z;
   return std::sqrt(dx*dx + dy*dy + dz*dz);
   }
 
-void assign(NetInterpolator::Sample& out, const NetInterpolator::State& s) {
+template<class Sample, class State>
+void assign(Sample& out, const State& s) {
   out.x        = s.x;
   out.y        = s.y;
   out.z        = s.z;
@@ -33,7 +35,8 @@ void assign(NetInterpolator::Sample& out, const NetInterpolator::State& s) {
 
 }
 
-void NetInterpolator::push(const State& s, uint64_t now) {
+template<class S>
+void NetInterpolatorT<S>::push(const State& s, uint64_t now) {
   if(!states.empty()) {
     auto& last = states.back();
     if(int32_t(s.seq - last.seq)<=0)
@@ -53,14 +56,16 @@ void NetInterpolator::push(const State& s, uint64_t now) {
     states.pop_front();
   }
 
-bool NetInterpolator::playbackTime(uint64_t now, int64_t& out) const {
+template<class S>
+bool NetInterpolatorT<S>::playbackTime(uint64_t now, int64_t& out) const {
   if(states.empty())
     return false;
   out = int64_t(now) - offset - Delay;
   return true;
   }
 
-bool NetInterpolator::sample(uint64_t now, Sample& out) const {
+template<class S>
+bool NetInterpolatorT<S>::sample(uint64_t now, Sample& out) const {
   if(states.empty())
     return false;
 
@@ -93,7 +98,11 @@ bool NetInterpolator::sample(uint64_t now, Sample& out) const {
   return true;
   }
 
-void NetInterpolator::clear() {
+template<class S>
+void NetInterpolatorT<S>::clear() {
   states.clear();
   offset = 0;
   }
+
+template class NetInterpolatorT<NetProtocol::PlayerState>;
+template class NetInterpolatorT<NetProtocol::NpcState>;

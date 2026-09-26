@@ -210,6 +210,125 @@ void receiveNpcs(NetSession& session, World& world) {
   world.setNetNpcsVersion(session.entitiesVersion());
   }
 
+// host: what its npcs near the other players are doing, for the clients to play it back (MP-20)
+void sendNpcStates(NetSession& session, World& world) {
+  if(!session.npcStatesDue())
+    return;
+  // the clients' characters here: the session picks the npcs near each of them
+  std::vector<Vec3> viewers;
+  for(auto& r:world.remotePlayers())
+    viewers.push_back(r.npc->position());
+  constexpr float View = NetSession::NpcViewDistance;
+
+  auto& ids = world.netEntities();
+  std::vector<NetSession::NpcState> list;
+  for(uint32_t i=0; i<world.npcCount(); ++i) {
+    Npc& npc = *world.npcById(i);
+    const NetEntityId id = ids.id(npc);
+    if(!id || npc.isNetPlayer())
+      continue;
+    const auto pos  = npc.position();
+    bool       near = false;
+    for(auto& v:viewers)
+      if((v-pos).quadLength()<=View*View)
+        near = true;
+    if(!near)
+      continue;
+    NetSession::NpcState s;
+    s.entityId    = id.value;
+    s.x           = pos.x;
+    s.y           = pos.y;
+    s.z           = pos.z;
+    s.rotation    = npc.rotation();
+    s.bodyState   = uint32_t(npc.bodyStateMasked());
+    if((s.bodyState & BS_MAX)==BS_UNCONSCIOUS && !npc.isUnconscious())
+      s.bodyState = (s.bodyState & ~uint32_t(BS_MAX)) | uint32_t(BS_STAND); // getting up, see sendState
+    s.hp          = std::max(npc.attribute(ATR_HITPOINTS), 0);
+    s.walkMode    = uint8_t(npc.walkMode());
+    s.weaponState = uint8_t(npc.weaponState());
+    npc.netAnims(s.anims, NetProtocol::MaxNpcAnims, NetProtocol::MaxAnimNameLength);
+    list.push_back(std::move(s));
+    }
+  session.setNpcStates(list);
+  }
+
+// client: the states of the host's npcs, queued on them for the playback
+void receiveNpcStates(NetSession& session, World& world) {
+  auto&          ids = world.netEntities();
+  auto&          net = world.netNpcs();
+  const uint64_t now = Application::tickCount();
+  for(auto& s:session.takeNpcStates()) {
+    Npc* npc = ids.npc(NetEntityId{s.entityId});
+    if(npc==nullptr || npc->isNetPlayer())
+      continue; // not spawned (yet)
+    auto& n = net[s.entityId];
+    if(n.npc!=npc)
+      n = World::NetNpc{npc}; // another npc under that id than before
+    n.motion.push(s, now);
+    n.lastSeen = now;
+    }
+  std::erase_if(net, [&](const auto& e) {
+    return ids.npc(NetEntityId{e.first})!=e.second.npc;
+    });
+  }
+
+void applyWeapon(Npc& npc, WeaponState want, uint32_t spell);
+
+// client: the host's npcs move along their states, NetInterpolator::Delay behind, and play what the host's play
+void applyNpcStates(World& world) {
+  // the host sends an npc in view at least every NpcRefreshMs: one not heard of for longer is out of view
+  constexpr uint64_t Stale = NetSession::NpcRefreshMs*2;
+  auto&          ids = world.netEntities();
+  const uint64_t now = Application::tickCount();
+  for(auto& [eid,n]:world.netNpcs()) {
+    Npc* npc = ids.npc(NetEntityId{eid});
+    if(npc==nullptr || npc!=n.npc)
+      continue;
+    if(now-n.lastSeen>Stale) {
+      if(auto last = n.motion.newest()) {
+        // out of view: it stays where it was last seen, but doesn't walk on the spot
+        const auto bs = BodyState(last->bodyState & BS_MAX);
+        if(!npc->isDown() && (bs==BS_WALK || bs==BS_RUN || bs==BS_SPRINT || bs==BS_SNEAK))
+          npc->setAnim(AnimationSolver::Idle);
+        n.motion.clear();
+        n.anims.clear(); // coming back into view, it takes up all animations again
+        }
+      continue;
+      }
+
+    NetNpcInterpolator::Sample cur;
+    if(!n.motion.sample(now, cur))
+      continue;
+    npc->setPosition(cur.x, cur.y, cur.z);
+    npc->setDirection(cur.rotation);
+
+    // falls and gets up as the host's, when the host's Hit hasn't felled it already (MP-16)
+    auto&      s   = *cur.state;
+    const auto bs  = BodyState(s.bodyState & BS_MAX);
+    const bool was = n.unconscious;
+    n.unconscious  = bs==BS_UNCONSCIOUS;
+    if(bs==BS_DEAD)
+      npc->netDown(true);
+    else if(n.unconscious)
+      npc->netDown(false);
+    else if(was)
+      npc->netStandUp();
+    if(npc->isDown()) {
+      n.anims.clear();
+      continue;
+      }
+
+    auto& hp = npc->handle().attribute[ATR_HITPOINTS];
+    hp = std::clamp(s.hp, 1, std::max(npc->handle().attribute[ATR_HITPOINTSMAX], 1)); // 0 only by netDown
+    npc->setWalkMode(WalkBit(s.walkMode));
+    if(s.anims!=n.anims) {
+      npc->netPlayAnims(n.anims, s.anims, bs);
+      n.anims = s.anims;
+      }
+    applyWeapon(*npc, WeaponState(s.weaponState), 0); // when the animation drawing it was missed
+    }
+  }
+
 // the state of the local hero, sent to the other players
 void sendState(NetSession& session, World& world) {
   auto& pl = *world.player();
@@ -641,9 +760,12 @@ void NetWorldSync::tick(NetSession* session, World& world) {
   if(session->isHost()) {
     tickHost(*session, world);
     sendNpcs(*session, world);
+    sendNpcStates(*session, world);
     } else {
     tickClient(*session, world);
     receiveNpcs(*session, world);
+    receiveNpcStates(*session, world);
+    applyNpcStates(world);
     }
   syncTime   (*session, world);
   sendState  (*session, world);
