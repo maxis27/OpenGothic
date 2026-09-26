@@ -146,6 +146,9 @@ void write(Writer& w, const PlayerAttack& m) {
   w.u32(m.time);
   w.u32(m.target);
   w.u8 (uint8_t(m.move));
+  w.f32(m.dx);
+  w.f32(m.dy);
+  w.f32(m.dz);
   }
 
 void write(Writer& w, const Hit& m) {
@@ -237,7 +240,8 @@ std::optional<Message> readPlayerAttack(Reader& r) {
   PlayerAttack m;
   uint8_t      move = 0;
   if(!r.u32(m.playerId) || !r.u32(m.entityId) || m.entityId==0 || !r.u32(m.time) || !r.u32(m.target) ||
-     !r.u8(move) || move<uint8_t(AttackMove::Swing) || move>uint8_t(AttackMove::Finish) || !r.atEnd())
+     !r.u8(move) || move<uint8_t(AttackMove::Swing) || move>uint8_t(AttackMove::Shoot) ||
+     !r.f32(m.dx) || !r.f32(m.dy) || !r.f32(m.dz) || !r.atEnd())
     return std::nullopt;
   m.move = AttackMove(move);
   return m;

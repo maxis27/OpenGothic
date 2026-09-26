@@ -19,7 +19,7 @@
 namespace NetProtocol {
 
   // bump on every incompatible change of any message
-  constexpr uint16_t Version = 8;
+  constexpr uint16_t Version = 9;
   // "OGMP", identifies OpenGothic multiplayer traffic
   constexpr uint32_t Magic   = 0x504D474F;
 
@@ -135,24 +135,28 @@ namespace NetProtocol {
     int64_t     time = 0;      // never negative
     };
 
-  // melee moves of PlayerAttack, the combat actions of PlayerIntent that start one
+  // moves of PlayerAttack, the combat actions of PlayerIntent that start one
   enum class AttackMove : uint8_t {
     Swing      = 1, // ActForward: fists or weapon forward, continuing a combo
     SwingLeft  = 2, // ActLeft
     SwingRight = 3, // ActRight
     Parade     = 4, // ActBack
     Finish     = 5, // ActKill: finishing move on an unconscious character
+    Shoot      = 6, // ActForward with a bow or crossbow drawn: an arrow or bolt is fired (MP-17)
     };
 
   // player -> server -> other players, reliable: a player's character has started an attack.
   // The others replay it on their copy of the character when their playback of its states
   // (NetInterpolator) reaches time; only the host's copy deals damage, see Hit.
+  // A shot is fired again by the copy: at target, where the receiver has it, like the sender aimed at its
+  // own view of it; without a target (or one unknown to the receiver) along dx,dy,dz.
   struct PlayerAttack {
     uint32_t    playerId = 0;
     uint32_t    entityId = 0;   // attacking character (PlayerSpawn::entityId)
     uint32_t    time     = 0;   // sender's session clock in ms, the clock of PlayerState::time
     uint32_t    target   = 0;   // entity id of the character aimed at, 0: none
     AttackMove  move     = AttackMove::Swing;
+    float       dx = 0, dy = 0, dz = 0; // Shoot: initial velocity of the arrow; 0,0,0 otherwise
     };
 
   // server -> client, reliable: a character with a network id was hit in the server's world.

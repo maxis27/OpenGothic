@@ -9,6 +9,7 @@
 #include "net/nettransport.h"
 
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -101,7 +102,12 @@ void testEncoding() {
         attack->target==21 && attack->move==AttackMove::SwingLeft, "PlayerAttack round trip");
   auto noIdAttack = encode(PlayerAttack{3, 0, 1, 0, AttackMove::Swing});
   check(!decode(noIdAttack.data(), noIdAttack.size()), "PlayerAttack without entity id is refused");
-  auto badMove = encode(PlayerAttack{3, 17, 1, 0, AttackMove(6)});
+  auto shot = roundTrip(PlayerAttack{3, 17, 98765, 0, AttackMove::Shoot, 2.5f, 0.25f, -1.5f}, s);
+  check(shot!=nullptr && shot->move==AttackMove::Shoot && shot->target==0 &&
+        shot->dx==2.5f && shot->dy==0.25f && shot->dz==-1.5f, "PlayerAttack shot round trip");
+  auto nanShot = encode(PlayerAttack{3, 17, 1, 0, AttackMove::Shoot, std::nanf(""), 0, 0});
+  check(!decode(nanShot.data(), nanShot.size()), "PlayerAttack shot with NaN direction is refused");
+  auto badMove = encode(PlayerAttack{3, 17, 1, 0, AttackMove(7)});
   check(!decode(badMove.data(), badMove.size()), "PlayerAttack with unknown move is refused");
   auto cutAttack = encode(PlayerAttack{3, 17, 1, 0, AttackMove::Finish});
   check(!decode(cutAttack.data(), cutAttack.size()-1), "truncated PlayerAttack is refused");
