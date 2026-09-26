@@ -129,6 +129,11 @@ void sendState(NetSession& session, World& world) {
   s.z           = pos.z;
   s.rotation    = pl.rotation();
   s.bodyState   = uint32_t(pl.bodyStateMasked());
+  if((s.bodyState & BS_MAX)==BS_UNCONSCIOUS && !pl.isUnconscious()) {
+    // getting up: the pose stays BS_UNCONSCIOUS until the animation is over, but the character is no
+    // longer down (ZS_Unconscious has ended) and can't be finished off any more
+    s.bodyState = (s.bodyState & ~uint32_t(BS_MAX)) | uint32_t(BS_STAND);
+    }
   s.anim        = uint16_t(pl.lastAnim());
   s.walkMode    = uint8_t(pl.walkMode());
   s.weaponState = uint8_t(pl.weaponState());
@@ -226,7 +231,9 @@ void replayAttack(World& world, Npc& npc, const NetSession::PlayerAttack& a) {
         npc.blockSword();
       break;
     case M::Finish:
-      npc.finishingMove();
+      if(!npc.finishingMove())
+        Log::i("multiplayer: finishing move of ", npc.displayName(), " missed: ",
+               target==nullptr ? "no target" : !target->isUnconscious() ? "target not unconscious" : "out of range");
       break;
     }
   }
@@ -399,14 +406,10 @@ void applyWeapon(Npc& npc, WeaponState want) {
 // one gets up again once its player's has. Death is undone only by the host's respawn.
 // Returns false while the character is down.
 bool applyDown(World::RemotePlayer& r, const NetSession::PlayerState& s) {
-  using A = AnimationSolver::Anim;
   auto&      npc  = *r.npc;
   const auto bs   = BodyState(s.bodyState & BS_MAX);
-  // the pose keeps BS_UNCONSCIOUS until the animation of getting up is over; the player is up
-  // as soon as it starts (AI_StandUp: setAnim(Idle)), so its character gets up along with it
-  const bool lies = s.anim==A::UnconsciousA || s.anim==A::UnconsciousB;
   const bool was  = r.unconscious;
-  r.unconscious   = bs==BS_UNCONSCIOUS && lies;
+  r.unconscious   = bs==BS_UNCONSCIOUS; // no longer while getting up, see sendState
   if(bs==BS_DEAD)
     npc.netDown(true);
   else if(r.unconscious)
