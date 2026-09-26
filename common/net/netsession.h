@@ -111,6 +111,31 @@ class NetSession final {
     // one it followed last. Stays 0 on the host.
     uint64_t entitiesVersion() const { return entityVersion; }
 
+    // What the npcs of the host's world are doing (MP-20): the host runs their AI and routines and sends where
+    // they are and which animations they play; a client moves its copies along.
+    using NpcState = NetProtocol::NpcState;
+    // at most this often the host sends npc states (20 Hz)
+    static constexpr uint64_t NpcStateIntervalMs = 50;
+    // npcs farther than this from a player's character are not sent to its player
+    static constexpr float    NpcViewDistance    = 6000.f;
+    // an npc that has changed is sent again for this long, so a lost packet costs no more than a frame
+    static constexpr uint64_t NpcRepeatMs        = 200;
+    // an npc in view is sent at least this often, even when nothing changes
+    static constexpr uint64_t NpcRefreshMs       = 1000;
+    // npc states are split into packets of at most about this size, below the usual MTU
+    static constexpr size_t   NpcPacketBytes     = 1100;
+    // client: npc states received and not taken yet, at most this many (the oldest go)
+    static constexpr size_t   MaxPendingNpcStates = 8192;
+    // Host: true when NpcStateIntervalMs have passed since the npc states were last sent.
+    bool     npcStatesDue() const;
+    // Host: the states of the npcs of its world (seq and time are filled in here), at least of the ones near a
+    // player. When due, every client gets the ones near its player's character (its latest PlayerState, else where
+    // it was spawned) that it hasn't got yet, that have changed within NpcRepeatMs or haven't been sent for
+    // NpcRefreshMs. Ignored on a client and while not due.
+    void     setNpcStates(const std::vector<NpcState>& list);
+    // Client: the npc states received from the host since the last call, oldest first.
+    auto     takeNpcStates() -> std::vector<NpcState>;
+
     // Service the network: handshake, chat, players joining and leaving.
     void     poll(uint32_t timeoutMs = 0);
     // Send a chat line to the other players; false when offline or the text is empty.
@@ -158,6 +183,16 @@ class NetSession final {
     std::vector<Avatar>                              respawns;
     std::map<uint32_t,Entity>                        entityMap;
     uint64_t                                         entityVersion = 0;
+    // host: what each client has been sent of each npc; client: the npc states not taken yet
+    struct NpcSent {
+      NpcState st;
+      uint64_t changed = 0;
+      uint64_t sent    = 0;
+      };
+    std::map<PlayerId,std::unordered_map<uint32_t,NpcSent>> npcSent;
+    uint32_t                                         npcSeq     = 0;
+    uint64_t                                         npcSentAt  = 0;
+    std::vector<NpcState>                            npcStates;
     // host: last time of its world set and last one sent (with when); client: the host's time not taken yet
     std::optional<int64_t>                           worldTime;
     std::optional<int64_t>                           worldTimeSent;

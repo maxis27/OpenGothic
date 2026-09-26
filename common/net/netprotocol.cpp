@@ -182,6 +182,30 @@ void write(Writer& w, const DespawnEntity& m) {
   w.u32(m.entityId);
   }
 
+void write(Writer& w, const NpcStates& m) {
+  const size_t count = m.npcs.size()<MaxNpcStates ? m.npcs.size() : MaxNpcStates;
+  w.u8 (uint8_t(MsgType::NpcStates));
+  w.u32(m.seq);
+  w.u32(m.time);
+  w.u8 (uint8_t(count));
+  for(size_t i=0; i<count; ++i) {
+    auto& n = m.npcs[i];
+    const size_t anims = n.anims.size()<MaxNpcAnims ? n.anims.size() : MaxNpcAnims;
+    w.u32(n.entityId);
+    w.f32(n.x);
+    w.f32(n.y);
+    w.f32(n.z);
+    w.f32(n.rotation);
+    w.u32(n.bodyState);
+    w.u32(uint32_t(n.hp));
+    w.u8 (n.walkMode);
+    w.u8 (n.weaponState);
+    w.u8 (uint8_t(anims));
+    for(size_t a=0; a<anims; ++a)
+      w.str(n.anims[a], MaxAnimNameLength);
+    }
+  }
+
 std::optional<Message> readHello(Reader& r) {
   Hello    m;
   uint32_t magic = 0;
@@ -315,6 +339,33 @@ std::optional<Message> readDespawnEntity(Reader& r) {
   return m;
   }
 
+std::optional<Message> readNpcStates(Reader& r) {
+  NpcStates m;
+  uint8_t   count = 0;
+  if(!r.u32(m.seq) || !r.u32(m.time) || !r.u8(count))
+    return std::nullopt;
+  m.npcs.resize(count);
+  for(auto& n:m.npcs) {
+    uint32_t hp    = 0;
+    uint8_t  anims = 0;
+    n.seq  = m.seq;
+    n.time = m.time;
+    if(!r.u32(n.entityId) || n.entityId==0 ||
+       !r.f32(n.x) || !r.f32(n.y) || !r.f32(n.z) || !r.f32(n.rotation) ||
+       !r.u32(n.bodyState) || !r.u32(hp) || int32_t(hp)<0 ||
+       !r.u8(n.walkMode) || !r.u8(n.weaponState) || !r.u8(anims) || anims>MaxNpcAnims)
+      return std::nullopt;
+    n.hp = int32_t(hp);
+    n.anims.resize(anims);
+    for(auto& a:n.anims)
+      if(!r.str(a, MaxAnimNameLength) || a.empty())
+        return std::nullopt;
+    }
+  if(!r.atEnd())
+    return std::nullopt;
+  return m;
+  }
+
 bool isValidName(const std::string& name) {
   if(name.empty() || name.size()>MaxNameLength)
     return false;
@@ -351,6 +402,7 @@ std::optional<Message> NetProtocol::decode(const uint8_t* data, size_t size) {
     case MsgType::Hit:          return readHit(r);
     case MsgType::SpawnEntity:  return readSpawnEntity(r);
     case MsgType::DespawnEntity: return readDespawnEntity(r);
+    case MsgType::NpcStates:    return readNpcStates(r);
     }
   return std::nullopt;
   }

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <utility>
 
 using namespace NetProtocol;
@@ -14,6 +15,26 @@ constexpr uint64_t ConnectTimeoutMs = 5000;
 uint64_t nowMs() {
   using namespace std::chrono;
   return uint64_t(duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
+  }
+
+// the npc has moved or does something else than when it was last sent
+bool npcChanged(const NpcState& a, const NpcState& b) {
+  constexpr float Move = 1.f;   // cm
+  constexpr float Turn = 0.5f;  // degrees
+  float turn = std::fabs(std::fmod(a.rotation-b.rotation, 360.f));
+  if(turn>180.f)
+    turn = 360.f-turn;
+  return std::fabs(a.x-b.x)>Move || std::fabs(a.y-b.y)>Move || std::fabs(a.z-b.z)>Move || turn>Turn ||
+         a.bodyState!=b.bodyState || a.hp!=b.hp || a.walkMode!=b.walkMode || a.weaponState!=b.weaponState ||
+         a.anims!=b.anims;
+  }
+
+// bytes of one npc in an NpcStates packet
+size_t npcStateSize(const NpcState& n) {
+  size_t sz = 4*7 + 3;
+  for(size_t i=0; i<n.anims.size() && i<MaxNpcAnims; ++i)
+    sz += 2 + std::min(n.anims[i].size(), MaxAnimNameLength);
+  return sz;
   }
 
 // chat comes from other players: keep it on one line
@@ -210,6 +231,85 @@ void NetSession::setEntities(std::vector<Entity> list) {
     }
   }
 
+bool NetSession::npcStatesDue() const {
+  return server && st==State::Online && (npcSeq==0 || nowMs()-npcSentAt>=NpcStateIntervalMs);
+  }
+
+void NetSession::setNpcStates(const std::vector<NpcState>& list) {
+  if(!npcStatesDue())
+    return;
+  const uint64_t now = nowMs();
+  npcSentAt = now;
+  ++npcSeq;
+  const uint32_t time = uint32_t(now-startTime);
+
+  for(auto& [peer,pid]:peers) {
+    if(pid==NoPlayer)
+      continue;
+    // the player's character: where its player last said it is, else where the host spawned it
+    float px = 0, py = 0, pz = 0;
+    if(auto s = playerState(pid)) {
+      px = s->x; py = s->y; pz = s->z;
+      }
+    else if(auto a = avatar(pid)) {
+      px = a->x; py = a->y; pz = a->z;
+      }
+    else
+      continue;
+
+    auto&     sent = npcSent[pid];
+    NpcStates pkg;
+    size_t    size = 10;
+    auto flush = [&]() {
+      if(pkg.npcs.empty())
+        return;
+      pkg.seq  = npcSeq;
+      pkg.time = time;
+      // lost ones aren't resent as such: a change is repeated for NpcRepeatMs anyway
+      send(peer, pkg, NetTransport::Unreliable);
+      pkg.npcs.clear();
+      size = 10;
+      };
+
+    std::unordered_map<uint32_t,NpcSent> next;
+    next.reserve(sent.size());
+    for(auto& n:list) {
+      const float dx = n.x-px, dy = n.y-py, dz = n.z-pz;
+      if(n.entityId==0 || dx*dx+dy*dy+dz*dz>NpcViewDistance*NpcViewDistance)
+        continue; // out of view: sent again as a newcomer when it comes back
+      NpcSent e;
+      e.changed = now; // new to the client
+      if(auto it = sent.find(n.entityId); it!=sent.end()) {
+        e = it->second;
+        if(npcChanged(e.st, n))
+          e.changed = now;
+        else if(now-e.changed>=NpcRepeatMs && now-e.sent<NpcRefreshMs) {
+          next[n.entityId] = e; // the client has it: compared with what it has, not with the latest
+          continue;
+          }
+        }
+      e.st   = n;
+      e.sent = now;
+      next[n.entityId] = e;
+
+      NpcState out = n;
+      out.seq  = npcSeq;
+      out.time = time;
+      const size_t sz = npcStateSize(out);
+      if(size+sz>NpcPacketBytes || pkg.npcs.size()>=MaxNpcStates)
+        flush();
+      pkg.npcs.push_back(std::move(out));
+      size += sz;
+      }
+    flush();
+    sent = std::move(next);
+    }
+  }
+
+auto NetSession::takeNpcStates() -> std::vector<NpcState> {
+  return std::exchange(npcStates, {});
+  }
+
 void NetSession::clearWorld() {
   players.clear();
   avatars.clear();
@@ -220,10 +320,13 @@ void NetSession::clearWorld() {
   if(!entityMap.empty())
     ++entityVersion;
   entityMap.clear();
+  npcSent.clear();
+  npcStates.clear();
   }
 
 void NetSession::forgetPlayer(PlayerId id) {
   players.erase(id);
+  npcSent.erase(id);
   avatars.erase(id);
   states .erase(id);
   std::erase_if(attacks, [id](const PlayerAttack& a){ return a.playerId==id; });
@@ -431,6 +534,15 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
   if(auto m = std::get_if<DespawnEntity>(&*msg)) {
     if(st==State::Online && entityMap.erase(m->entityId)>0)
       ++entityVersion;
+    return;
+    }
+  if(auto m = std::get_if<NpcStates>(&*msg)) {
+    if(st!=State::Online)
+      return;
+    for(auto& n:m->npcs)
+      npcStates.push_back(n);
+    if(npcStates.size()>MaxPendingNpcStates)
+      npcStates.erase(npcStates.begin(), npcStates.end()-ptrdiff_t(MaxPendingNpcStates));
     return;
     }
   if(auto m = std::get_if<Chat>(&*msg)) {

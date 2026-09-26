@@ -12,11 +12,14 @@
 //  - a respawned character reaches every client as a respawn, a newcomer gets it as a plain one;
 //  - the npcs the host sets reach every client, newcomers included as they are then: new and replaced
 //    ones are spawned, missing ones despawned, only changes bump the clients' version;
+//  - npc states reach the clients near the npcs only, intact and split into packets; unchanged npcs
+//    are repeated for NpcRepeatMs, then sent only every NpcRefreshMs; a change is sent at once;
 //  - a client leaving is announced to the others.
 // Usage: NetSessionTest <port>. Exits with 0 on success.
 
 #include "net/netsession.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -72,6 +75,92 @@ bool runUntil(std::vector<Player*> all, Pred done) {
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
   return false;
+  }
+
+// the host keeps setting list for ms; returns what diego and milten got meanwhile
+struct NpcsGot {
+  std::vector<NetSession::NpcState> diego, milten;
+  size_t count(const std::vector<NetSession::NpcState>& v, uint32_t id) const {
+    size_t n = 0;
+    for(auto& s:v)
+      n += s.entityId==id ? 1 : 0;
+    return n;
+    }
+  };
+
+NpcsGot pumpNpcs(Player& host, Player& diego, Player& milten, const std::vector<NetSession::NpcState>& list, int ms) {
+  NpcsGot got;
+  auto end = Clock::now() + std::chrono::milliseconds(ms);
+  while(Clock::now()<end) {
+    host.session->setNpcStates(list);
+    for(auto p:{&host,&diego,&milten})
+      p->session->poll();
+    for(auto& s:diego.session->takeNpcStates())
+      got.diego.push_back(s);
+    for(auto& s:milten.session->takeNpcStates())
+      got.milten.push_back(s);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+  return got;
+  }
+
+// diego's character is at 110,200,300 (its last state), milten's at 7,8,9 (spawned there, no state)
+void testNpcStates(Player& host, Player& diego, Player& milten) {
+  check(!diego.session->npcStatesDue(), "clients send no npc states");
+  diego.session->setNpcStates({{50}});
+
+  NetSession::NpcState near;
+  near.entityId = 50;
+  near.x = 150; near.y = 200; near.z = 300; near.rotation = 30;
+  near.bodyState = 2; near.hp = 77; near.walkMode = 1; near.weaponState = 3;
+  near.anims = {"S_RUNL", "T_JOINT_RANDOM_1"};
+  NetSession::NpcState far = near;
+  far.entityId = 51;
+  far.x = 110+NetSession::NpcViewDistance+1;
+
+  // new npcs are sent at once and repeated for NpcRepeatMs
+  auto got = pumpNpcs(host, diego, milten, {near, far}, 100);
+  check(got.count(got.diego, 50)>0 && got.count(got.milten, 50)>0, "npc states reach the clients near the npc");
+  check(got.count(got.diego, 51)==0 && got.count(got.milten, 51)==0, "npcs out of view are not sent");
+  if(!got.diego.empty()) {
+    auto& d = got.diego.front();
+    check(d.x==150 && d.y==200 && d.z==300 && d.rotation==30 && d.bodyState==2 && d.hp==77 && d.walkMode==1 &&
+          d.weaponState==3 && d.anims==near.anims && d.seq>0, "an npc state arrives intact");
+    }
+  for(size_t i=1; i<got.diego.size(); ++i)
+    check(got.diego[i].seq>got.diego[i-1].seq && got.diego[i].time>=got.diego[i-1].time,
+          "npc states come with growing seq and time");
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(NetSession::NpcStateIntervalMs+10));
+  check(host.session->npcStatesDue(), "npc states are due after NpcStateIntervalMs");
+  host.session->setNpcStates({near, far});
+  check(!host.session->npcStatesDue(), "the next npc states wait for NpcStateIntervalMs");
+
+  // unchanged, and past NpcRepeatMs: nothing until NpcRefreshMs; a change is sent at once
+  pumpNpcs(host, diego, milten, {near, far}, int(NetSession::NpcRepeatMs));
+  got = pumpNpcs(host, diego, milten, {near, far}, 300);
+  check(got.diego.empty() && got.milten.empty(), "an unchanged npc isn't sent again");
+  near.anims = {"S_SIT"};
+  got = pumpNpcs(host, diego, milten, {near, far}, 100);
+  check(!got.diego.empty() && got.diego.front().anims==near.anims, "a changed npc is sent");
+  got = pumpNpcs(host, diego, milten, {near, far}, int(NetSession::NpcRefreshMs)+300);
+  check(got.count(got.diego, 50)>=2 && got.count(got.diego, 50)<=10, "an unchanged npc is refreshed now and then");
+
+  // many npcs with long animation names: split into packets small enough, none lost
+  std::vector<NetSession::NpcState> many;
+  for(uint32_t i=0; i<300; ++i) {
+    NetSession::NpcState s = near;
+    s.entityId = 1000+i;
+    s.x        = 100+float(i);
+    s.anims    = {std::string(NetProtocol::MaxAnimNameLength, 'A'), "S_RUN", "S_WALK", "T_DIALOGGESTURE_01"};
+    many.push_back(s);
+    }
+  got = pumpNpcs(host, diego, milten, many, 150);
+  std::vector<bool> seen(300);
+  for(auto& s:got.diego)
+    if(s.entityId>=1000 && s.entityId<1300)
+      seen[s.entityId-1000] = true;
+  check(std::count(seen.begin(), seen.end(), true)==300, "many npc states are split into packets and all arrive");
   }
 
 void testSession(uint16_t port) {
@@ -317,6 +406,8 @@ void testSession(uint16_t port) {
   host.session->setEntities({{30, Npc, 101}, {32, Npc, 300}, {33, Npc, 100}});
   ok = runUntil({&host,&diego,&milten}, [&]{ return diego.session->entities().at(30).instance==101; });
   check(ok, "an id naming another npc is spawned again");
+
+  testNpcStates(host, diego, milten);
 
   Player gorn;
   gorn.session = NetSession::connect("127.0.0.1", port, "Gorn");

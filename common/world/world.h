@@ -4,6 +4,7 @@
 #include <Tempest/IndexBuffer>
 #include <Tempest/Matrix4x4>
 #include <deque>
+#include <map>
 #include <string>
 #include <functional>
 
@@ -138,6 +139,15 @@ class World final {
     // multiplayer client: NetSession::entitiesVersion() the npcs of this world were last brought in line with
     uint64_t             netNpcsVersion() const { return netNpcsVer; }
     void                 setNetNpcsVersion(uint64_t v) { netNpcsVer = v; }
+    // multiplayer client: how the npcs of the host's world are played back (MP-20), by network id
+    struct NetNpc final {
+      const Npc*               npc = nullptr; // the npc the states are for: an id the host reuses names another one
+      NetNpcInterpolator       motion;       // states received from the host, played back smoothly
+      std::vector<std::string> anims;        // animations of the last state played back
+      uint64_t                 lastSeen = 0; // local time the last state arrived
+      bool                     unconscious = false; // unconscious in the last state played back
+      };
+    auto                 netNpcs() -> std::map<uint32_t,NetNpc>& { return netNpcMotion; }
     auto                 netEntities() -> NetEntityRegistry& { return wobj.netEntities(); }
     // Hits on characters with a network id (Npc::reportNetHit), for the multiplayer host to send
     // to the clients; kept until taken, at most MaxNetHits of them.
@@ -252,6 +262,7 @@ class World final {
     std::vector<RemotePlayer>             remotePl;
     std::vector<NetProtocol::Hit>         netHits;
     uint64_t                              netNpcsVer = uint64_t(-1);
+    std::map<uint32_t,NetNpc>             netNpcMotion;
 
     std::unique_ptr<DynamicWorld>         wdynamic;
     std::unique_ptr<WorldView>            wview;

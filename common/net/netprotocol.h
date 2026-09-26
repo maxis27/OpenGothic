@@ -19,7 +19,7 @@
 namespace NetProtocol {
 
   // bump on every incompatible change of any message
-  constexpr uint16_t Version = 12;
+  constexpr uint16_t Version = 13;
   // "OGMP", identifies OpenGothic multiplayer traffic
   constexpr uint32_t Magic   = 0x504D474F;
 
@@ -45,6 +45,7 @@ namespace NetProtocol {
     Hit          = 11,
     SpawnEntity  = 12,
     DespawnEntity = 13,
+    NpcStates    = 14,
     };
 
   enum class RejectReason : uint8_t {
@@ -223,8 +224,42 @@ namespace NetProtocol {
     uint32_t    entityId = 0;   // never 0
     };
 
+  // animations of an npc sent in NpcState, and the length of their names
+  constexpr size_t MaxNpcAnims       = 4;
+  constexpr size_t MaxAnimNameLength = 48;
+  // npcs in one NpcStates packet (the sender splits them to stay under the MTU)
+  constexpr size_t MaxNpcStates      = 255;
+
+  // what an npc of the server's world is doing (MP-20), one entry of NpcStates. Npcs run their AI and routines
+  // only in the server's world; a client moves its copy along these and plays the same animations.
+  struct NpcState {
+    uint32_t    entityId    = 0;   // SpawnEntity::entityId, never 0
+    uint32_t    seq         = 0;   // of the NpcStates it came in, not encoded per npc
+    uint32_t    time        = 0;   // likewise
+    float       x = 0, y = 0, z = 0;
+    float       rotation    = 0;   // degrees, Npc::rotation()
+    uint32_t    bodyState   = 0;   // BodyState, Npc::bodyStateMasked()
+    int32_t     hp          = 0;   // hit points, >= 0
+    uint8_t     walkMode    = 0;   // WalkBit
+    uint8_t     weaponState = 0;   // WeaponState
+    // names of the animations playing (one per layer of the pose, lowest layer first), at most MaxNpcAnims of
+    // MaxAnimNameLength: the npc's routine (sitting, sweeping, praying, ...) as much as its walk or its blows
+    std::vector<std::string> anims;
+
+    bool operator == (const NpcState& o) const = default;
+    };
+
+  // server -> client over the unreliable channel ~20 times a second: the npcs near the client's player that have
+  // changed lately (and each of them at least once a second); seq grows with every NpcStates of the server,
+  // time is the server's session clock in ms, like PlayerState::time
+  struct NpcStates {
+    uint32_t              seq  = 0;
+    uint32_t              time = 0;
+    std::vector<NpcState> npcs; // at most MaxNpcStates
+    };
+
   using Message = std::variant<Hello,Welcome,Reject,Chat,PlayerJoined,PlayerLeft,PlayerSpawn,PlayerState,WorldTime,
-                               PlayerAttack,Hit,SpawnEntity,DespawnEntity>;
+                               PlayerAttack,Hit,SpawnEntity,DespawnEntity,NpcStates>;
 
   std::vector<uint8_t> encode(const Message& msg);
   // Returns nothing for truncated, oversized or unknown packets.

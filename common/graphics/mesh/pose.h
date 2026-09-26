@@ -69,6 +69,9 @@ class Pose final {
     bool               isInAnim(std::string_view           sq) const;
     bool               isInAnim(const Animation::Sequence* sq) const;
     bool               hasAnim() const;
+    // the animations playing, one per layer, lowest layer first
+    size_t             layerCount() const { return lay.size(); }
+    auto               layerSequence(size_t i) const -> const Animation::Sequence* { return lay[i].seq; }
     uint64_t           animationTotalTime() const;
     uint64_t           atkTotalTime() const;
 

@@ -10,9 +10,11 @@
 // between the two states around that moment, so late or lost packets don't make it jerk.
 // The sender's clock (PlayerState::time) is mapped to the local one from the arrival times.
 // Independent of the game itself; times are in ms of any monotonic local clock.
-class NetInterpolator final {
+// S is a state with seq, time, x, y, z and rotation: PlayerState, or NpcState for the npcs of the host (MP-20).
+template<class S>
+class NetInterpolatorT final {
   public:
-    using State = NetProtocol::PlayerState;
+    using State = S;
 
     // how far behind the newest state the character is shown
     static constexpr uint32_t Delay        = 100;
@@ -46,3 +48,11 @@ class NetInterpolator final {
     // local time minus sender's time, of the fastest packet (slowly following drift)
     int64_t           offset    = 0;
   };
+
+// the players' characters
+using NetInterpolator    = NetInterpolatorT<NetProtocol::PlayerState>;
+// the npcs of the host's world on a client
+using NetNpcInterpolator = NetInterpolatorT<NetProtocol::NpcState>;
+
+extern template class NetInterpolatorT<NetProtocol::PlayerState>;
+extern template class NetInterpolatorT<NetProtocol::NpcState>;

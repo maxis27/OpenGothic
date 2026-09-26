@@ -91,6 +91,10 @@ class MdlVisual final {
     const Animation::Sequence*     startAnimAndGet(Npc& npc, AnimationSolver::Anim    a, uint8_t comb, WeaponState st, WalkBit wlk);
 
     bool                           startAnim      (Npc& npc, WeaponState st);
+    // the sequence of an animation of this model by name (overlays applied), nullptr when it has none
+    const Animation::Sequence*     sequence       (std::string_view name) const;
+    // multiplayer: starts sq as the host's copy of the npc plays it, cutting short whatever plays on its layer
+    bool                           startNetAnim   (Npc& npc, const Animation::Sequence* sq, BodyState bs);
     const Animation::Sequence*     startAnimItem  (Npc& npc, std::string_view scheme, int state);
     const Animation::Sequence*     startAnimSpell (Npc& npc, std::string_view scheme, bool invest);
     bool                           startAnimDialog(Npc& npc);
