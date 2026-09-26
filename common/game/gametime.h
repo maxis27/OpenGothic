@@ -12,6 +12,7 @@ class gtime final {
     gtime(int64_t day,int64_t hour,int64_t min):time(day*dayMilis+hour*hourMilis+min*minMilis){}
 
     int64_t toInt() const { return time; }
+    static gtime fromInt(int64_t milis) { return gtime(milis); }
     void    addMilis(uint64_t t){ time+=t; }
 
     int64_t day()       const { return time/dayMilis; }

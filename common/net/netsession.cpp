@@ -1,6 +1,7 @@
 #include "netsession.h"
 
 #include <chrono>
+#include <utility>
 
 using namespace NetProtocol;
 
@@ -112,6 +113,25 @@ void NetSession::onPlayerState(PlayerId from, PlayerState s, NetTransport::PeerI
     sendOthers(peer, s, NetTransport::Unreliable);
   }
 
+void NetSession::setWorldTime(int64_t time) {
+  if(!server || time<0)
+    return;
+  worldTime = time;
+  const uint64_t now     = nowMs();
+  const bool     jumped  = worldTimeSent && (time<*worldTimeSent || time-*worldTimeSent>=WorldTimeJump);
+  if(worldTimeSent && !jumped && now-worldTimeSentAt<WorldTimeIntervalMs)
+    return;
+  worldTimeSent   = time;
+  worldTimeSentAt = now;
+  sendOthers(NetTransport::InvalidPeer, WorldTime{time});
+  }
+
+auto NetSession::takeWorldTime() -> std::optional<int64_t> {
+  if(server)
+    return std::nullopt;
+  return std::exchange(worldTime, std::nullopt);
+  }
+
 void NetSession::forgetPlayer(PlayerId id) {
   players.erase(id);
   avatars.erase(id);
@@ -211,6 +231,8 @@ void NetSession::onHello(NetTransport::PeerId peer, const Hello& hello) {
   send(peer, Welcome{id, world, nowMs()-startTime});
   for(auto& [pid,a]:avatars)
     send(peer, a);
+  if(worldTime)
+    send(peer, WorldTime{*worldTime});
   sendOthers(peer, PlayerJoined{id, hello.name});
 
   peers[peer] = id;
@@ -284,6 +306,11 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
   if(auto m = std::get_if<PlayerState>(&*msg)) {
     if(st==State::Online)
       onPlayerState(m->playerId, *m, hostPeer);
+    return;
+    }
+  if(auto m = std::get_if<WorldTime>(&*msg)) {
+    if(st==State::Online)
+      worldTime = m->time;
     return;
     }
   if(auto m = std::get_if<Chat>(&*msg)) {

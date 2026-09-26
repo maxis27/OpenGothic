@@ -84,6 +84,14 @@ void testEncoding() {
   auto cutState = encode(PlayerState{4, 17, 1});
   check(!decode(cutState.data(), cutState.size()-1), "truncated PlayerState is refused");
 
+  // day 12, 21:37 in game milliseconds
+  auto time = roundTrip(WorldTime{((12*24+21)*60+37)*60000ll}, s);
+  check(time!=nullptr && time->time==((12*24+21)*60+37)*60000ll, "WorldTime round trip");
+  auto negTime = encode(WorldTime{-1});
+  check(!decode(negTime.data(), negTime.size()), "negative WorldTime is refused");
+  auto cutTime = encode(WorldTime{1});
+  check(!decode(cutTime.data(), cutTime.size()-1), "truncated WorldTime is refused");
+
   // too long strings are cut on encode
   auto longChat = roundTrip(Chat{1, std::string(MaxChatLength+100, 'a')}, s);
   check(longChat!=nullptr && longChat->text.size()==MaxChatLength, "Chat text is limited");

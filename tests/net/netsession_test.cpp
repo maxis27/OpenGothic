@@ -5,6 +5,8 @@
 //    and only a new entity id is sent again;
 //  - the character states a player sends reach every other player (through the host),
 //    no more often than StateIntervalMs, and only newer ones replace older ones;
+//  - the host's world time reaches every client, newcomers included, at most every
+//    WorldTimeIntervalMs unless the clock has jumped;
 //  - a client leaving is announced to the others.
 // Usage: NetSessionTest <port>. Exits with 0 on success.
 
@@ -14,6 +16,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -99,6 +102,26 @@ void testSession(uint16_t port) {
         diego.session->avatar(NetSession::HostPlayer)->rotation==90, "character data arrives intact");
   check(host.session->avatar(99)==nullptr, "no character for an unknown player");
 
+  // world time: 8:00 on day 0, then a minute later (too soon to send), then after sleeping
+  const int64_t hour = 60*60*1000;
+  std::optional<int64_t> time;
+  host.session->setWorldTime(8*hour);
+  diego.session->setWorldTime(20*hour); // clients can't
+  ok = runUntil({&host,&diego}, [&]{ time = diego.session->takeWorldTime(); return time.has_value(); });
+  check(ok && *time==8*hour, "client gets the host's time");
+  check(!host.session->takeWorldTime(), "the host takes no time from anyone");
+  host.session->setWorldTime(8*hour+60*1000);
+  for(int i=0; i<50; ++i) { // let anything sent arrive, well within WorldTimeIntervalMs
+    host.session->poll();
+    diego.session->poll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+  check(!diego.session->takeWorldTime(), "the time is sent at most every WorldTimeIntervalMs");
+  host.session->setWorldTime(22*hour);
+  ok = runUntil({&host,&diego}, [&]{ time = diego.session->takeWorldTime(); return time.has_value(); });
+  check(ok && *time==22*hour, "a jump of the clock is sent at once");
+  check(!diego.session->takeWorldTime(), "a time is taken only once");
+
   milten.session = NetSession::connect("127.0.0.1", port, "Milten");
   check(milten.session!=nullptr, "second client starts connecting");
   if(milten.session==nullptr)
@@ -123,6 +146,8 @@ void testSession(uint16_t port) {
     });
   check(ok, "a newcomer gets the characters already in the world");
   check(milten.session->avatar(milten.session->playerId())==nullptr, "the newcomer's own character isn't spawned yet");
+  time = milten.session->takeWorldTime();
+  check(time && *time==22*hour, "a newcomer gets the host's time");
 
   host.session->setAvatar({milten.session->playerId(), 14, 7, 8, 9, 0});
   // the same id again (a moved character) is not resent, a new id is

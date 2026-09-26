@@ -4,6 +4,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -64,6 +65,18 @@ class NetSession final {
     // Latest state received from another player, nullptr when none yet.
     auto     playerState(PlayerId id) const -> const PlayerState*;
 
+    // Time of day in the host's world (gtime::toInt()): the host owns the clock, the clients follow.
+    // at most this often the host sends its time while the clock runs normally
+    static constexpr uint64_t WorldTimeIntervalMs = 1000;
+    // a clock this far off the last sent time (game ms) has jumped, e.g. by sleeping: sent at once
+    static constexpr int64_t  WorldTimeJump       = 60*60*1000;
+    // Host: the current time of its world, called every frame. Sent to the clients every
+    // WorldTimeIntervalMs or at once when it has jumped; newcomers get it right after Welcome.
+    // Ignored on a client and for negative times.
+    void     setWorldTime(int64_t time);
+    // Client: the host's time received since the last call, nothing when none came.
+    auto     takeWorldTime() -> std::optional<int64_t>;
+
     // Service the network: handshake, chat, players joining and leaving.
     void     poll(uint32_t timeoutMs = 0);
     // Send a chat line to the other players; false when offline or the text is empty.
@@ -104,6 +117,10 @@ class NetSession final {
     std::map<PlayerId,PlayerState>                   states;
     uint32_t                                         stateSeq  = 0;
     uint64_t                                         stateSent = 0;
+    // host: last time of its world set and last one sent (with when); client: the host's time not taken yet
+    std::optional<int64_t>                           worldTime;
+    std::optional<int64_t>                           worldTimeSent;
+    uint64_t                                         worldTimeSentAt = 0;
     // host: player of each connected peer, NoPlayer until its Hello is accepted
     std::unordered_map<NetTransport::PeerId,PlayerId> peers;
     PlayerId                                         nextPlayer = HostPlayer+1;
