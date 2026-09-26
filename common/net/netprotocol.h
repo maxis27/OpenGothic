@@ -19,7 +19,7 @@
 namespace NetProtocol {
 
   // bump on every incompatible change of any message
-  constexpr uint16_t Version = 5;
+  constexpr uint16_t Version = 6;
   // "OGMP", identifies OpenGothic multiplayer traffic
   constexpr uint32_t Magic   = 0x504D474F;
 
@@ -115,6 +115,8 @@ namespace NetProtocol {
     uint16_t    anim        = 0;   // AnimationSolver::Anim last started by the character
     uint8_t     walkMode    = 0;   // WalkBit
     uint8_t     weaponState = 0;   // WeaponState
+    uint32_t    meleeWeapon  = 0;  // script symbol of the equipped melee weapon (Item::clsId()), 0: none
+    uint32_t    rangedWeapon = 0;  // script symbol of the equipped bow or crossbow, 0: none
     };
 
   // server -> client, about once a second and after every jump of the clock: the time of day in

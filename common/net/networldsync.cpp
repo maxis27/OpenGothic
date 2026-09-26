@@ -5,7 +5,9 @@
 #include <cmath>
 #include <vector>
 
+#include "game/gamescript.h"
 #include "graphics/mesh/animationsolver.h"
+#include "world/objects/item.h"
 #include "world/objects/npc.h"
 #include "world/world.h"
 #include "netsession.h"
@@ -88,6 +90,10 @@ void sendState(NetSession& session, World& world) {
   s.anim        = uint16_t(pl.lastAnim());
   s.walkMode    = uint8_t(pl.walkMode());
   s.weaponState = uint8_t(pl.weaponState());
+  if(auto it = pl.currentMeleeWeapon())
+    s.meleeWeapon = uint32_t(it->clsId());
+  if(auto it = pl.currentRangedWeapon())
+    s.rangedWeapon = uint32_t(it->clsId());
   session.sendPlayerState(s);
   }
 
@@ -151,6 +157,89 @@ void applyAnim(World::RemotePlayer& r, const NetSession::PlayerState& s, float t
   npc.setAnimRotate(turn);
   }
 
+// true, if symbol is an item instance of the scripts (C_ITEM), which the other player's weapon should be;
+// both sides run the same scripts, so their symbol numbers are the same
+bool isItemInstance(World& world, uint32_t symbol) {
+  auto& sc  = world.script();
+  auto* sym = sc.findSymbol(symbol);
+  if(sym==nullptr || sym->type()!=zenkit::DaedalusDataType::INSTANCE || sym->address()==0)
+    return false;
+  const zenkit::DaedalusSymbol* cls = sym;
+  while(cls!=nullptr && cls->parent()!=uint32_t(-1))
+    cls = sc.findSymbol(cls->parent());
+  return cls!=nullptr && cls!=sym && cls->name()=="C_ITEM";
+  }
+
+// gives npc the weapon of the other player in place of the one it has in the slot
+void equipWeapon(World& world, Npc& npc, Item* current, uint32_t symbol, bool drawn, const char* what) {
+  const size_t cur = current!=nullptr ? current->clsId() : size_t(-1);
+  if(cur==symbol)
+    return;
+  if(drawn)
+    npc.closeWeapon(true); // the weapon in hand is about to be taken away
+  if(current!=nullptr)
+    npc.delItem(cur, uint32_t(current->count()));
+  if(symbol==0)
+    return;
+  if(!isItemInstance(world, symbol)) {
+    Log::e("multiplayer: unknown ", what, " ", symbol, " of ", npc.displayName());
+    return;
+    }
+  if(npc.addItem(symbol, 1)!=nullptr)
+    npc.useItem(symbol, Item::NSLOT, true); // no requirements: the other player could equip it
+  }
+
+// equips the weapons the other player has on
+void applyEquipment(World& world, World::RemotePlayer& r, const NetSession::PlayerState& s) {
+  auto&      npc = *r.npc;
+  const auto ws  = npc.weaponState();
+  if(s.meleeWeapon!=r.melee) {
+    equipWeapon(world, npc, npc.currentMeleeWeapon(), s.meleeWeapon,
+                ws==WeaponState::W1H || ws==WeaponState::W2H, "melee weapon");
+    r.melee = s.meleeWeapon;
+    }
+  if(s.rangedWeapon!=r.ranged) {
+    equipWeapon(world, npc, npc.currentRangedWeapon(), s.rangedWeapon,
+                ws==WeaponState::Bow || ws==WeaponState::CBow, "ranged weapon");
+    r.ranged = s.rangedWeapon;
+    }
+  }
+
+// draws or puts away the weapon as the other player did; a switch can take a few frames (put the old
+// weapon away, then draw the new one), and waits while the character can't switch, so it is repeated
+// until the character is in the state. Spells (Mage) belong to MP-18
+void applyWeapon(Npc& npc, WeaponState want) {
+  const auto cur   = npc.weaponState();
+  const bool melee = cur==WeaponState::W1H || cur==WeaponState::W2H;
+  const bool bow   = cur==WeaponState::Bow || cur==WeaponState::CBow;
+  switch(want) {
+    case WeaponState::NoWeapon:
+      if(cur!=WeaponState::NoWeapon)
+        npc.closeWeapon(false);
+      break;
+    case WeaponState::Fist:
+      if(cur!=WeaponState::Fist)
+        npc.drawWeaponFist();
+      break;
+    case WeaponState::W1H:
+    case WeaponState::W2H:
+      if(melee || npc.currentMeleeWeapon()==nullptr)
+        break; // without the weapon drawWeaponMelee would draw the fists again and again
+      if(cur==WeaponState::Fist)
+        npc.closeWeapon(false); // drawWeaponMelee takes the fists for a melee weapon
+      else
+        npc.drawWeaponMelee();
+      break;
+    case WeaponState::Bow:
+    case WeaponState::CBow:
+      if(!bow && npc.currentRangedWeapon()!=nullptr)
+        npc.drawWeaponBow();
+      break;
+    case WeaponState::Mage:
+      break;
+    }
+  }
+
 // moves the other players' characters along the states received from their players,
 // NetInterpolator::Delay behind, and plays their animations
 void applyStates(NetSession& session, World& world) {
@@ -177,6 +266,8 @@ void applyStates(NetSession& session, World& world) {
 
     r.npc->setPosition(cur.x, cur.y, cur.z);
     r.npc->setDirection(cur.rotation);
+    applyEquipment(world, r, *cur.state);
+    applyWeapon(*r.npc, WeaponState(cur.state->weaponState));
     applyAnim(r, *cur.state, turn*1000.f/float(TurnWindow));
     }
   }

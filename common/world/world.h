@@ -118,6 +118,8 @@ class World final {
       Npc*            npc      = nullptr;
       NetInterpolator motion;          // states received for npc, played back smoothly
       uint16_t        anim     = 0;    // AnimationSolver::Anim of the last state played back
+      uint32_t        melee    = uint32_t(-1); // weapons of the last state equipped on npc, -1: none yet
+      uint32_t        ranged   = uint32_t(-1);
       };
     auto                 remotePlayers() const -> const std::vector<RemotePlayer>& { return remotePl; }
     auto                 remotePlayers()       -> std::vector<RemotePlayer>&       { return remotePl; }

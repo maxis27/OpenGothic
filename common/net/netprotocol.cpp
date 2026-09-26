@@ -129,6 +129,8 @@ void write(Writer& w, const PlayerState& m) {
   w.u16(m.anim);
   w.u8 (m.walkMode);
   w.u8 (m.weaponState);
+  w.u32(m.meleeWeapon);
+  w.u32(m.rangedWeapon);
   }
 
 void write(Writer& w, const WorldTime& m) {
@@ -198,7 +200,8 @@ std::optional<Message> readPlayerState(Reader& r) {
   PlayerState m;
   if(!r.u32(m.playerId) || !r.u32(m.entityId) || m.entityId==0 || !r.u32(m.seq) || !r.u32(m.time) ||
      !r.f32(m.x) || !r.f32(m.y) || !r.f32(m.z) || !r.f32(m.rotation) ||
-     !r.u32(m.bodyState) || !r.u16(m.anim) || !r.u8(m.walkMode) || !r.u8(m.weaponState) || !r.atEnd())
+     !r.u32(m.bodyState) || !r.u16(m.anim) || !r.u8(m.walkMode) || !r.u8(m.weaponState) ||
+     !r.u32(m.meleeWeapon) || !r.u32(m.rangedWeapon) || !r.atEnd())
     return std::nullopt;
   return m;
   }

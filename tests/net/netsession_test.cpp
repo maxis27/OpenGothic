@@ -191,6 +191,7 @@ void testSession(uint16_t port) {
   ds.entityId = 15;
   ds.x = 100; ds.y = 200; ds.z = 300; ds.rotation = 45;
   ds.bodyState = 3; ds.anim = 2; ds.walkMode = 1; ds.weaponState = 4;
+  ds.meleeWeapon = 1200; ds.rangedWeapon = 1300;
   check(diego.session->sendPlayerState(ds), "client sends its state");
   check(!diego.session->sendPlayerState(ds), "the next state waits for StateIntervalMs");
   ds.entityId = 0;
@@ -202,7 +203,8 @@ void testSession(uint16_t port) {
   if(ok) {
     auto m = milten.session->playerState(diegoId);
     check(m->playerId==diegoId && m->entityId==15 && m->x==100 && m->y==200 && m->z==300 && m->rotation==45 &&
-          m->bodyState==3 && m->anim==2 && m->walkMode==1 && m->weaponState==4 && m->seq==1,
+          m->bodyState==3 && m->anim==2 && m->walkMode==1 && m->weaponState==4 &&
+          m->meleeWeapon==1200 && m->rangedWeapon==1300 && m->seq==1,
           "state arrives intact with the sender's id");
     }
   check(diego.session->playerState(diegoId)==nullptr, "a player gets no state of its own back");

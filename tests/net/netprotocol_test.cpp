@@ -72,10 +72,11 @@ void testEncoding() {
   auto noIdSpawn = encode(PlayerSpawn{4, 0, 0, 0, 0, 0});
   check(!decode(noIdSpawn.data(), noIdSpawn.size()), "PlayerSpawn without entity id is refused");
 
-  auto state = roundTrip(PlayerState{4, 17, 0xFFFFFFF0u, 123456, -1.f, 2.5f, 3e5f, 90.f, 0x18003, 2, 1, 3}, s);
+  auto state = roundTrip(PlayerState{4, 17, 0xFFFFFFF0u, 123456, -1.f, 2.5f, 3e5f, 90.f, 0x18003, 2, 1, 3, 0xABCD, 0xFFFFFFFFu}, s);
   check(state!=nullptr && state->playerId==4 && state->entityId==17 && state->seq==0xFFFFFFF0u &&
         state->time==123456 && state->x==-1.f && state->y==2.5f && state->z==3e5f && state->rotation==90.f &&
-        state->bodyState==0x18003 && state->anim==2 && state->walkMode==1 && state->weaponState==3,
+        state->bodyState==0x18003 && state->anim==2 && state->walkMode==1 && state->weaponState==3 &&
+        state->meleeWeapon==0xABCD && state->rangedWeapon==0xFFFFFFFFu,
         "PlayerState round trip");
   auto infState = encode(PlayerState{4, 17, 1, 0, 0, 0, 0, std::numeric_limits<float>::infinity()});
   check(!decode(infState.data(), infState.size()), "PlayerState with infinite rotation is refused");
