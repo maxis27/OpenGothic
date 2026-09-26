@@ -237,8 +237,13 @@ void WorldObjects::tick(uint64_t dt, uint64_t dtPlayer) {
 
   auto cpos  = camera!=nullptr ? camera->originLwc() : Vec3();
   auto plPos = pl!=nullptr ? pl->position() : cpos;
+  // multiplayer: npcs near the character of any player live a full life, not only the ones near the local one (MP-21)
+  auto& remotePl = owner.remotePlayers();
   for(auto& i:npcArr) {
     float dist = (i->position()-plPos).quadLength();
+    for(auto& r:remotePl)
+      if(r.npc!=nullptr)
+        dist = std::min(dist, (i->position()-r.npc->position()).quadLength());
     if(i->processPolicy()==NpcProcessPolicy::NetProxy) {
       // keep policy, controlled by network code; still interacts with collision zones when near
       if(dist<nearDist)
@@ -271,7 +276,9 @@ void WorldObjects::tick(uint64_t dt, uint64_t dtPlayer) {
 
     const uint64_t percNextTime = i.percNextTime();
     if(percNextTime<=owner.tickCount()) {
-      i.perceptionProcess(*pl);
+      // PERC_ASSESSPLAYER is about the nearest player standing; PERC_ASSESSENEMY already looks at every npc near
+      auto closest = remotePl.empty() ? pl : owner.nearestPlayer(i,true);
+      i.perceptionProcess(closest!=nullptr ? *closest : *pl);
       }
 
     if(i.processPolicy()==NpcProcessPolicy::AiNormal) {

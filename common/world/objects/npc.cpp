@@ -563,6 +563,10 @@ bool Npc::isPlayer() const {
   return aiPolicy==NpcProcessPolicy::Player;
   }
 
+bool Npc::isAnyPlayer() const {
+  return isPlayer() || owner.isRemotePlayer(*this);
+  }
+
 bool Npc::startClimb(JumpStatus jump) {
   setPosition(physic.position());
   visual.setAnimRotate(*this,0);
@@ -2313,7 +2317,7 @@ void Npc::netPlayAnims(const std::vector<std::string>& was, const std::vector<st
 
 bool Npc::isNetPlayer() const {
   // not every NetProxy npc: on a client the npcs of the host's world are NetProxy too (MP-19)
-  return Gothic::inst().isMultiplayer() && (isPlayer() || owner.isRemotePlayer(*this));
+  return Gothic::inst().isMultiplayer() && isAnyPlayer();
   }
 
 bool Npc::isNetHit(const Npc& other) {
@@ -2534,7 +2538,7 @@ void Npc::tickAnimationTags() {
 
   for(auto& i:ev.morph)
     visual.startMMAnim(*this,i.anim,i.node);
-  if(ev.groundSounds>0 && isPlayer() && bodyStateMasked()!=BodyState::BS_SNEAK)
+  if(ev.groundSounds>0 && isAnyPlayer() && bodyStateMasked()!=BodyState::BS_SNEAK)
     world().sendImmediatePerc(*this,*this,*this,PERC_ASSESSQUIETSOUND);
   if(ev.def_opt_frame>0)
     commitDamage();
@@ -3899,7 +3903,7 @@ bool Npc::closeWeapon(bool noAnim) {
   castLevel        = CS_NoCast;
   currentSpellCast = size_t(-1);
   castNextTime     = 0;
-  if(isPlayer())
+  if(isAnyPlayer())
     owner.sendPassivePerc(*this,*this,PERC_ASSESSREMOVEWEAPON);
   return true;
   }

@@ -133,6 +133,9 @@ class World final {
     Npc*                 addRemotePlayer(uint32_t playerId, std::string_view name, const Tempest::Vec3& pos, float rotation);
     void                 removeRemotePlayer(uint32_t playerId);
     bool                 isRemotePlayer(const Npc& npc) const;
+    // The player character nearest to npc: player() or, in multiplayer, another player's character (MP-21).
+    // With preferUp a player who is down is taken only when every player is down. nullptr: no player.
+    Npc*                 nearestPlayer(const Npc& npc, bool preferUp) const;
     // Multiplayer client: spawns an npc of the host's world (NetProtocol::SpawnEntity) as a NetProxy npc, the
     // only way a client gets npcs: addNpc refuses there (MP-19). Returns nullptr for an unknown instance.
     Npc*                 addNetNpc(size_t npcInstance, const Tempest::Vec3& pos, float rotation);

@@ -116,6 +116,8 @@ class Npc final {
     auto       processPolicy() const -> NpcProcessPolicy { return aiPolicy; }
 
     bool       isPlayer() const;
+    // the local player or, in multiplayer, the character of another player: whoever npcs react to as to a player (MP-21)
+    bool       isAnyPlayer() const;
     void       setWalkMode(WalkBit m);
     WalkBit    walkMode() const;
     void       tick(uint64_t dt);

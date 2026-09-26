@@ -1389,11 +1389,12 @@ Attitude GameScript::guildAttitude(const Npc &p0, const Npc &p1) const {
   }
 
 Attitude GameScript::personAttitude(const Npc &p0, const Npc &p1) const {
-  if(!p0.isPlayer() && !p1.isPlayer())
+  // the attitude an npc has to the hero holds for every player (MP-21)
+  if(!p0.isAnyPlayer() && !p1.isAnyPlayer())
     return guildAttitude(p0,p1);
 
   Attitude att=ATT_NULL;
-  const Npc& npc = p0.isPlayer() ? p1 : p0;
+  const Npc& npc = p0.isAnyPlayer() ? p1 : p0;
   att = npc.attitude();
   if(att!=ATT_NULL)
     return att;
@@ -1403,11 +1404,11 @@ Attitude GameScript::personAttitude(const Npc &p0, const Npc &p1) const {
 
 bool GameScript::isFriendlyFire(const Npc& src, const Npc& dst) const {
   const int AIV_PARTYMEMBER = (owner.version().game==2) ? 15 : 36;
-  if(src.isPlayer())
+  if(src.isAnyPlayer())
     return false;
   if(personAttitude(src, dst)==ATT_FRIENDLY)
     return true;
-  if(src.handlePtr()->aivar[AIV_PARTYMEMBER]!=0 && dst.isPlayer())
+  if(src.handlePtr()->aivar[AIV_PARTYMEMBER]!=0 && dst.isAnyPlayer())
     return true;
   return false;
   }
@@ -1818,7 +1819,7 @@ bool GameScript::wld_detectnpcex(std::shared_ptr<zenkit::INpc> npcRef, int inst,
        (state==-1 || n.isInState(uint32_t(state))) &&
        (guild==-1 || int32_t(n.guild())==guild) &&
        (&n!=npc) && !n.isDead() &&
-       (player!=0 || !n.isPlayer())) {
+       (player!=0 || !n.isAnyPlayer())) {
       float d = n.qDistTo(*npc);
       if(d<dist){
         ret = &n;
@@ -2284,7 +2285,8 @@ void GameScript::npc_clearaiqueue(std::shared_ptr<zenkit::INpc> npcRef) {
 
 bool GameScript::npc_isplayer(std::shared_ptr<zenkit::INpc> npcRef) {
   auto npc = findNpc(npcRef);
-  return npc && npc->isPlayer();
+  // perceptions and fights check other with Npc_IsPlayer: the other players must pass it too (MP-21)
+  return npc && npc->isAnyPlayer();
   }
 
 int GameScript::npc_getstatetime(std::shared_ptr<zenkit::INpc> npcRef) {
@@ -2571,7 +2573,7 @@ int GameScript::npc_getportalguild(std::shared_ptr<zenkit::INpc> npcRef) {
 
 bool GameScript::npc_isinplayersroom(std::shared_ptr<zenkit::INpc> npcRef) {
   auto npc = findNpc(npcRef);
-  auto pl  = world().player();
+  auto pl  = npc!=nullptr ? world().nearestPlayer(*npc,false) : nullptr;
 
   if(npc!=nullptr && pl!=nullptr) {
     auto g1 = pl ->portalName();
@@ -2841,8 +2843,8 @@ int GameScript::npc_getheighttoitem(std::shared_ptr<zenkit::INpc> npcRef, std::s
   }
 
 int GameScript::npc_getdisttoplayer(std::shared_ptr<zenkit::INpc> npcRef) {
-  auto pl  = world().player();
   auto npc = findNpc(npcRef);
+  auto pl  = npc!=nullptr ? world().nearestPlayer(*npc,false) : nullptr;
   if(pl==nullptr || npc==nullptr) {
     return std::numeric_limits<int32_t>::max();
     }
