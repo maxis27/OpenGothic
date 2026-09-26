@@ -144,10 +144,12 @@ void sendState(NetSession& session, World& world) {
   session.sendPlayerState(s);
   }
 
-// the melee move of an attack animation started by a character, see Npc::lastAttack
-std::optional<NetProtocol::AttackMove> attackMove(AnimationSolver::Anim a) {
+// the move of an attack animation started by a character, see Npc::lastAttack
+std::optional<NetProtocol::AttackMove> attackMove(AnimationSolver::Anim a, WeaponState ws) {
   using A = AnimationSolver::Anim;
   using M = NetProtocol::AttackMove;
+  if(ws==WeaponState::Bow || ws==WeaponState::CBow)
+    return a==A::Attack ? std::optional(M::Shoot) : std::nullopt;
   switch(a) {
     case A::Attack:       return M::Swing;
     case A::AttackL:      return M::SwingLeft;
@@ -176,13 +178,18 @@ void sendAttacks(NetSession& session, World& world) {
 
   auto&             ids = world.netEntities();
   const NetEntityId id  = ids.id(pl);
-  const auto        mv  = attackMove(pl.lastAttack());
+  const auto        mv  = attackMove(pl.lastAttack(), pl.weaponState());
   if(!id || !mv)
     return;
   NetSession::PlayerAttack a;
   a.entityId = id.value;
   a.move     = *mv;
   a.target   = pl.lastAttackTarget();
+  if(a.move==NetProtocol::AttackMove::Shoot) {
+    a.dx = pl.lastShot().x;
+    a.dy = pl.lastShot().y;
+    a.dz = pl.lastShot().z;
+    }
   session.sendAttack(a);
   }
 
@@ -202,16 +209,26 @@ void receiveAttacks(NetSession& session, World& world) {
     }
   }
 
-// the other player's character does what the player did; on the host its blow deals the damage,
+// the other player's character does what the player did; on the host its blow or arrow deals the damage,
 // on a client only the host's Hit does (Npc::isNetHit)
 void replayAttack(World& world, Npc& npc, const NetSession::PlayerAttack& a) {
   Npc* target = a.target!=0 ? world.netEntities().npc(NetEntityId{a.target}) : nullptr;
-  npc.setTarget(target!=&npc ? target : nullptr);
+  if(target==&npc)
+    target = nullptr;
+  npc.setTarget(target);
+
+  using M = NetProtocol::AttackMove;
+  if(a.move==M::Shoot) {
+    // at the target where this world has it, as the player aimed at where its world had it (the arrow
+    // is aimed at the target, Npc::shootBow); the bow may not be drawn here yet, the arrow flies anyway
+    if(!npc.netShoot(target, Vec3(a.dx, a.dy, a.dz)))
+      Log::i("multiplayer: shot of ", npc.displayName(), " missed: no bow or crossbow equipped");
+    return;
+    }
 
   const auto ws = npc.weaponState();
   if(ws!=WeaponState::Fist && ws!=WeaponState::W1H && ws!=WeaponState::W2H)
     return; // the weapon isn't drawn (yet): no blow
-  using M = NetProtocol::AttackMove;
   switch(a.move) {
     case M::Swing:
       if(ws==WeaponState::Fist)
@@ -240,6 +257,8 @@ void replayAttack(World& world, Npc& npc, const NetSession::PlayerAttack& a) {
         Log::i("multiplayer: finishing move of ", npc.displayName(), " missed: ", why,
                " (weapon state ", int(ws), ", distance ", int(dist), ")");
         }
+      break;
+    case M::Shoot:
       break;
     }
   }
@@ -275,8 +294,9 @@ void syncTime(NetSession& session, World& world) {
 // turning speed is measured over this long, ms
 constexpr uint64_t TurnWindow = 100;
 
-// animations of a player's movement which are replayed on its character; the rest (attacks,
-// interactions, items, ...) belongs to the later parts of the synchronization
+// animations of a player's movement which are replayed on its character, with aiming a bow; the rest
+// (attacks, interactions, items, ...) is replayed by its own messages or belongs to the later parts
+// of the synchronization
 bool isMovementAnim(uint16_t a) {
   using A = AnimationSolver::Anim;
   switch(a) {
@@ -294,6 +314,7 @@ bool isMovementAnim(uint16_t a) {
     case A::JumpHang:
     case A::SlideA:
     case A::SlideB:
+    case A::AimBow:
       return true;
     }
   return false;

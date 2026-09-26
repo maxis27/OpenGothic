@@ -3941,6 +3941,7 @@ bool Npc::doAttack(Anim anim, BodyState bs) {
     ++attacksStarted;
     lastAttackStarted = anim;
     lastAttackTargetId = currentTarget!=nullptr ? owner.netEntities().id(*currentTarget).value : 0;
+    lastShotDir       = {};
     // implAniWait(uint64_t(sq->atkTotalTime(visual.comboLength())+1));
     return true;
     }
@@ -3964,6 +3965,7 @@ bool Npc::blockFist() {
     ++attacksStarted;
     lastAttackStarted = Anim::AttackBlock;
     lastAttackTargetId = currentTarget!=nullptr ? owner.netEntities().id(*currentTarget).value : 0;
+    lastShotDir       = {};
     }
   return true;
   }
@@ -4235,6 +4237,43 @@ bool Npc::shootBow(Interactive* focOverride) {
   auto& b = owner.shootBullet(*itm,*this,currentTarget,focOverride);
 
   invent.delItem(size_t(munition),1,*this);
+  initBullet(b);
+
+  ++attacksStarted;
+  lastAttackStarted  = Anim::Attack;
+  lastAttackTargetId = currentTarget!=nullptr ? owner.netEntities().id(*currentTarget).value : 0;
+  lastShotDir        = b.direction();
+  return true;
+  }
+
+bool Npc::netShoot(const Npc* target, const Vec3& dir) {
+  auto rgn = currentRangedWeapon();
+  if(rgn==nullptr || rgn->handle().munition<0)
+    return false;
+  const size_t munition = size_t(rgn->handle().munition);
+  if(invent.itemCount(munition)==0 && addItem(munition,1)==nullptr)
+    return false;
+  auto itm = invent.getItem(munition);
+  if(itm==nullptr)
+    return false;
+
+  // the arrow flies also when the animation is refused (e.g. still drawing the bow): on the host it deals
+  // the damage its player's shot has dealt in the player's world
+  const auto ws = weaponState();
+  if(ws==WeaponState::Bow || ws==WeaponState::CBow) {
+    visual.setAnimRotate(*this,0);
+    setAnim(Anim::Attack);
+    }
+
+  auto& b = owner.shootBullet(*itm,*this,target,nullptr);
+  if(target==nullptr && dir!=Vec3())
+    b.setDirection(dir*(DynamicWorld::bulletSpeed/dir.length()));
+  invent.delItem(munition,1,*this);
+  initBullet(b);
+  return true;
+  }
+
+void Npc::initBullet(Bullet& b) {
   b.setOrigin(this);
   b.setDamage(DamageCalculator::rangeDamageValue(*this));
 
@@ -4250,7 +4289,6 @@ bool Npc::shootBow(Interactive* focOverride) {
       b.setHitChance(float(hnpc->hitchance[TALENT_CROSSBOW])/100.f); else
       b.setHitChance(float(hnpc->hitchance[TALENT_BOW]     )/100.f);
     }
-  return true;
   }
 
 bool Npc::hasAmmunition() const {

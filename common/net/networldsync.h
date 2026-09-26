@@ -15,6 +15,8 @@ class World;
 //  - every player sends the attacks of its own character; the others replay them on their copy
 //    of it as the playback of its movement reaches them. Only the host deals damage: it sends
 //    every hit, the clients play its effects and take the hit points over (MP-15);
+//  - a shot is fired again by the copies of the shooter, at the target where each world has it; only the
+//    arrow of the host's copy deals damage, like a blow (MP-17);
 //  - a character falls dead or unconscious as the host's Hit or its own player says, gets up when its
 //    player's does; the host respawns a dead one at the start point after RespawnDelayMs (MP-16);
 //  - the host sends the time of day of its world, the clients take it over (MP-12);

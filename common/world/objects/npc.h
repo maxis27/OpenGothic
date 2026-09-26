@@ -174,12 +174,14 @@ class Npc final {
     bool       setAnim(Anim a);
     // last animation started through setAnim/setAnimAngGet, for multiplayer
     Anim       lastAnim() const { return lastAnimStarted; }
-    // melee attacks and parades started (doAttack, blockFist): how many so far, the animation
+    // attacks, parades and shots started (doAttack, blockFist, shootBow): how many so far, the animation
     // of the last one and the network id of its target (0: none), for multiplayer; the target is
-    // taken when the attack starts, the focus may be lost right after (finishing moves)
+    // taken when the attack starts, the focus may be lost right after (finishing moves).
+    // A shot is Anim::Attack with a bow or crossbow drawn; lastShot is the initial velocity of its arrow
     uint32_t   attackCount()      const { return attacksStarted;    }
     Anim       lastAttack()       const { return lastAttackStarted; }
     uint32_t   lastAttackTarget() const { return lastAttackTargetId; }
+    auto       lastShot()         const -> const Tempest::Vec3& { return lastShotDir; }
     auto       setAnimAngGet(Anim a) -> const Animation::Sequence*;
     auto       setAnimAngGet(Anim a, uint8_t comb) -> const Animation::Sequence*;
     void       setAnimRotate(int rot);
@@ -287,6 +289,10 @@ class Npc final {
     int32_t   activeSpellLevel() const;
     bool      aimBow();
     bool      shootBow(Interactive* focOverride = nullptr);
+    // multiplayer: the character of another player fires the arrow its player did (MP-17), at target,
+    // or along dir (the arrow's velocity) without one; the arrow is given for the shot, the character
+    // has none (items belong to MP-22)
+    bool      netShoot(const Npc* target, const Tempest::Vec3& dir);
     bool      hasAmmunition() const;
 
     bool      isEnemy(const Npc& other) const;
@@ -540,6 +546,7 @@ class Npc final {
     void      takeDamage(Npc& other, const Bullet* b, const CollideMask bMask, int32_t splId, bool isSpell);
     void      takeFallDamage(const Tempest::Vec3& fallSpeed);
     void      takeDrownDamage();
+    void      initBullet(Bullet& b);
     // multiplayer client: between characters with a network id only the host deals damage;
     // the ones only this client has (npcs until MP-19) still hurt locally
     bool      isNetHit(const Npc& other);
@@ -589,6 +596,7 @@ class Npc final {
     uint32_t                       attacksStarted          =0;
     Anim                           lastAttackStarted       =Anim::NoAnim;
     uint32_t                       lastAttackTargetId      =0;
+    Tempest::Vec3                  lastShotDir             ={};
     int32_t                        trGuild                 =GIL_NONE;
     int32_t                        talentsSk[TALENT_MAX_G2]={};
     int32_t                        talentsVl[TALENT_MAX_G2]={};

@@ -52,6 +52,10 @@ void Bullet::setDirection(const Tempest::Vec3& dir) {
   updateMatrix();
   }
 
+Tempest::Vec3 Bullet::direction() const {
+  return obj->direction();
+  }
+
 void Bullet::setTargetRange(float t) {
   obj->setTargetRange(t);
   }
