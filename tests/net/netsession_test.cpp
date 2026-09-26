@@ -7,6 +7,8 @@
 //    no more often than StateIntervalMs, and only newer ones replace older ones;
 //  - the host's world time reaches every client, newcomers included, at most every
 //    WorldTimeIntervalMs unless the clock has jumped;
+//  - attacks reach every other player (through the host), only with the sender's own character;
+//    the host's hits reach every client;
 //  - a client leaving is announced to the others.
 // Usage: NetSessionTest <port>. Exits with 0 on success.
 
@@ -229,6 +231,49 @@ void testSession(uint16_t port) {
     return m!=nullptr && m->x==110 && m->seq==2;
     });
   check(ok, "a newer state replaces the older one");
+
+  // attacks: client -> host -> other client, and host -> clients
+  std::vector<NetSession::PlayerAttack> hostAtk, diegoAtk, miltenAtk;
+  auto collectAttacks = [&]{
+    for(auto& a:host.session->takeAttacks())   hostAtk.push_back(a);
+    for(auto& a:diego.session->takeAttacks())  diegoAtk.push_back(a);
+    for(auto& a:milten.session->takeAttacks()) miltenAtk.push_back(a);
+    };
+  check(diego.session->sendAttack({77, 15, 0, 10, NetProtocol::AttackMove::SwingLeft}), "client sends an attack");
+  check(diego.session->sendAttack({77, 11, 0, 10, NetProtocol::AttackMove::Swing}), "client sends an attack with a foreign character");
+  check(!diego.session->sendAttack({77, 0, 0, 10, NetProtocol::AttackMove::Swing}), "an attack without a character is not sent");
+  check(host.session->sendAttack({0, 10, 0, 15, NetProtocol::AttackMove::Parade}), "host sends an attack");
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    collectAttacks();
+    return !hostAtk.empty() && !diegoAtk.empty() && miltenAtk.size()>=2;
+    });
+  check(ok, "attacks reach the host and the other players");
+  for(int i=0; i<50; ++i) { // let anything else sent arrive
+    for(auto p:{&host,&diego,&milten})
+      p->session->poll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+  collectAttacks();
+  check(hostAtk.size()==1 && hostAtk[0].playerId==diegoId && hostAtk[0].entityId==15 && hostAtk[0].target==10 &&
+        hostAtk[0].move==NetProtocol::AttackMove::SwingLeft, "the host gets the client's attack intact");
+  check(miltenAtk.size()==2, "an attack with another player's character is dropped");
+  check(diegoAtk.size()==1 && diegoAtk[0].playerId==NetSession::HostPlayer && diegoAtk[0].move==NetProtocol::AttackMove::Parade,
+        "a player gets no attack of its own back");
+
+  // hits: host -> clients only
+  host.session->sendHit({10, 15, 80, 20, NetSession::Hit::Effect|NetSession::Hit::Stumble});
+  diego.session->sendHit({15, 10, 0, 999, 0}); // clients can't
+  std::vector<NetSession::Hit> diegoHits, miltenHits;
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    for(auto& h:diego.session->takeHits())  diegoHits.push_back(h);
+    for(auto& h:milten.session->takeHits()) miltenHits.push_back(h);
+    return !diegoHits.empty() && !miltenHits.empty();
+    });
+  check(ok, "hits reach every client");
+  check(diegoHits.size()==1 && diegoHits[0].attacker==10 && diegoHits[0].target==15 && diegoHits[0].hp==80 &&
+        diegoHits[0].damage==20 && diegoHits[0].flags==(NetSession::Hit::Effect|NetSession::Hit::Stumble),
+        "a hit arrives intact");
+  check(host.session->takeHits().empty(), "the host takes no hits from anyone");
 
   // leaving
   const auto miltenId = milten.session->playerId();

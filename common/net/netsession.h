@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 #include "netprotocol.h"
 #include "nettransport.h"
@@ -65,6 +66,23 @@ class NetSession final {
     // Latest state received from another player, nullptr when none yet.
     auto     playerState(PlayerId id) const -> const PlayerState*;
 
+    // Attacks of the players' characters and the hits they deal. Every player sends the attacks
+    // of its own character, the host relays them to the others. Only the host deals damage:
+    // it sends every hit on a character with a network id to the clients.
+    using PlayerAttack = NetProtocol::PlayerAttack;
+    using Hit          = NetProtocol::Hit;
+    // attacks and hits received are kept until taken, at most this many of each
+    static constexpr size_t MaxPending = 256;
+    // Sends an attack of this player's character (playerId and time are filled in here);
+    // false when offline.
+    bool     sendAttack(const PlayerAttack& a);
+    // Attacks of the other players' characters received since the last call, oldest first.
+    auto     takeAttacks() -> std::vector<PlayerAttack>;
+    // Host: a hit in its world, sent to every client. Ignored on a client.
+    void     sendHit(const Hit& h);
+    // Client: hits received from the host since the last call, oldest first.
+    auto     takeHits() -> std::vector<Hit>;
+
     // Time of day in the host's world (gtime::toInt()): the host owns the clock, the clients follow.
     // at most this often the host sends its time while the clock runs normally
     static constexpr uint64_t WorldTimeIntervalMs = 1000;
@@ -95,6 +113,7 @@ class NetSession final {
     void     reject     (NetTransport::PeerId peer, const NetProtocol::Reject& r);
 
     void     onPlayerState(PlayerId from, NetProtocol::PlayerState s, NetTransport::PeerId peer);
+    void     onAttack     (PlayerId from, NetProtocol::PlayerAttack a, NetTransport::PeerId peer);
     void     forgetPlayer (PlayerId id);
 
     void     send       (NetTransport::PeerId peer, const NetProtocol::Message& msg,
@@ -117,6 +136,8 @@ class NetSession final {
     std::map<PlayerId,PlayerState>                   states;
     uint32_t                                         stateSeq  = 0;
     uint64_t                                         stateSent = 0;
+    std::vector<PlayerAttack>                        attacks;
+    std::vector<Hit>                                 hits;
     // host: last time of its world set and last one sent (with when); client: the host's time not taken yet
     std::optional<int64_t>                           worldTime;
     std::optional<int64_t>                           worldTimeSent;

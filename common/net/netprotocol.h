@@ -19,7 +19,7 @@
 namespace NetProtocol {
 
   // bump on every incompatible change of any message
-  constexpr uint16_t Version = 6;
+  constexpr uint16_t Version = 7;
   // "OGMP", identifies OpenGothic multiplayer traffic
   constexpr uint32_t Magic   = 0x504D474F;
 
@@ -41,6 +41,8 @@ namespace NetProtocol {
     PlayerSpawn  = 7,
     PlayerState  = 8,
     WorldTime    = 9,
+    PlayerAttack = 10,
+    Hit          = 11,
     };
 
   enum class RejectReason : uint8_t {
@@ -126,7 +128,47 @@ namespace NetProtocol {
     int64_t     time = 0;      // never negative
     };
 
-  using Message = std::variant<Hello,Welcome,Reject,Chat,PlayerJoined,PlayerLeft,PlayerSpawn,PlayerState,WorldTime>;
+  // melee moves of PlayerAttack, the combat actions of PlayerIntent that start one
+  enum class AttackMove : uint8_t {
+    Swing      = 1, // ActForward: fists or weapon forward, continuing a combo
+    SwingLeft  = 2, // ActLeft
+    SwingRight = 3, // ActRight
+    Parade     = 4, // ActBack
+    Finish     = 5, // ActKill: finishing move on an unconscious character
+    };
+
+  // player -> server -> other players, reliable: a player's character has started an attack.
+  // The others replay it on their copy of the character when their playback of its states
+  // (NetInterpolator) reaches time; only the host's copy deals damage, see Hit.
+  struct PlayerAttack {
+    uint32_t    playerId = 0;
+    uint32_t    entityId = 0;   // attacking character (PlayerSpawn::entityId)
+    uint32_t    time     = 0;   // sender's session clock in ms, the clock of PlayerState::time
+    uint32_t    target   = 0;   // entity id of the character aimed at, 0: none
+    AttackMove  move     = AttackMove::Swing;
+    };
+
+  // server -> client, reliable: a character with a network id was hit in the server's world.
+  // The server alone deals damage; a client plays the effects and takes the hit points over.
+  struct Hit {
+    enum Flag : uint8_t {
+      Effect   = 1<<0, // the weapon's hit effect (sound, blood)
+      Blocked  = 1<<1, // parried: block effect, no damage
+      Stumble  = 1<<2, // the target is thrown back (stumble animation)
+      StumbleB = 1<<3, // with the StumbleB animation instead of StumbleA
+      DontKill = 1<<4, // at no hit points the target falls unconscious instead of dying
+      Scream   = 1<<5, // the target cries out
+      AllFlags = (1<<6)-1,
+      };
+    uint32_t    attacker = 0;   // entity id, 0: none or unknown to the network
+    uint32_t    target   = 0;   // entity id, never 0
+    int32_t     hp       = 0;   // hit points of the target after the hit, >= 0
+    int32_t     damage   = 0;   // hit points taken, >= 0
+    uint8_t     flags    = 0;   // Flag
+    };
+
+  using Message = std::variant<Hello,Welcome,Reject,Chat,PlayerJoined,PlayerLeft,PlayerSpawn,PlayerState,WorldTime,
+                               PlayerAttack,Hit>;
 
   std::vector<uint8_t> encode(const Message& msg);
   // Returns nothing for truncated, oversized or unknown packets.

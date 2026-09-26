@@ -100,6 +100,8 @@ class Gothic final {
     NetSession*  netSession() { return net.get(); }
     // free-roam multiplayer has no story: saving, dialogs, cutscenes and videos are off
     bool         isMultiplayer() const { return net!=nullptr; }
+    // client of a multiplayer session: the host alone deals damage (see NetWorldSync)
+    bool         isNetClient() const;
     // service the multiplayer session; called every frame
     void         tickNetwork();
 

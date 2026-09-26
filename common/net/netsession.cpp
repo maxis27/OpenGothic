@@ -113,6 +113,48 @@ void NetSession::onPlayerState(PlayerId from, PlayerState s, NetTransport::PeerI
     sendOthers(peer, s, NetTransport::Unreliable);
   }
 
+bool NetSession::sendAttack(const PlayerAttack& a) {
+  if(st!=State::Online || a.entityId==0)
+    return false;
+  PlayerAttack msg = a;
+  msg.playerId = self;
+  msg.time     = uint32_t(nowMs()-startTime);
+  if(server)
+    sendOthers(NetTransport::InvalidPeer, msg); else
+    send(hostPeer, msg);
+  return true;
+  }
+
+auto NetSession::takeAttacks() -> std::vector<PlayerAttack> {
+  return std::exchange(attacks, {});
+  }
+
+void NetSession::onAttack(PlayerId from, PlayerAttack a, NetTransport::PeerId peer) {
+  if(from==self || players.count(from)==0)
+    return;
+  if(server) {
+    // a player attacks only with its own character
+    auto it = avatars.find(from);
+    if(it==avatars.end() || it->second.entityId!=a.entityId)
+      return;
+    }
+  a.playerId = from;
+  if(attacks.size()<MaxPending)
+    attacks.push_back(a);
+  if(server)
+    sendOthers(peer, a);
+  }
+
+void NetSession::sendHit(const Hit& h) {
+  if(!server || st!=State::Online || h.target==0)
+    return;
+  sendOthers(NetTransport::InvalidPeer, h);
+  }
+
+auto NetSession::takeHits() -> std::vector<Hit> {
+  return std::exchange(hits, {});
+  }
+
 void NetSession::setWorldTime(int64_t time) {
   if(!server || time<0)
     return;
@@ -136,6 +178,7 @@ void NetSession::forgetPlayer(PlayerId id) {
   players.erase(id);
   avatars.erase(id);
   states .erase(id);
+  std::erase_if(attacks, [id](const PlayerAttack& a){ return a.playerId==id; });
   }
 
 void NetSession::poll(uint32_t timeoutMs) {
@@ -207,6 +250,10 @@ void NetSession::hostEvent(const NetTransport::Event& e) {
     onPlayerState(from, *state, e.peer);
     return;
     }
+  if(auto attack = std::get_if<PlayerAttack>(&*msg)) {
+    onAttack(from, *attack, e.peer);
+    return;
+    }
   if(auto chat = std::get_if<Chat>(&*msg)) {
     const std::string line = sanitize(chat->text);
     sendOthers(e.peer, Chat{from, line});
@@ -260,6 +307,8 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
       players.clear();
       avatars.clear();
       states.clear();
+      attacks.clear();
+      hits.clear();
       return;
     case NetTransport::EventType::Receive:
       break;
@@ -275,6 +324,8 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
     players.clear();
     avatars.clear();
     states.clear();
+    attacks.clear();
+    hits.clear();
     return;
     }
   if(auto m = std::get_if<Welcome>(&*msg)) {
@@ -311,6 +362,16 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
   if(auto m = std::get_if<WorldTime>(&*msg)) {
     if(st==State::Online)
       worldTime = m->time;
+    return;
+    }
+  if(auto m = std::get_if<PlayerAttack>(&*msg)) {
+    if(st==State::Online)
+      onAttack(m->playerId, *m, hostPeer);
+    return;
+    }
+  if(auto m = std::get_if<Hit>(&*msg)) {
+    if(st==State::Online && hits.size()<MaxPending)
+      hits.push_back(*m);
     return;
     }
   if(auto m = std::get_if<Chat>(&*msg)) {

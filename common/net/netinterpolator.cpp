@@ -53,6 +53,13 @@ void NetInterpolator::push(const State& s, uint64_t now) {
     states.pop_front();
   }
 
+bool NetInterpolator::playbackTime(uint64_t now, int64_t& out) const {
+  if(states.empty())
+    return false;
+  out = int64_t(now) - offset - Delay;
+  return true;
+  }
+
 bool NetInterpolator::sample(uint64_t now, Sample& out) const {
   if(states.empty())
     return false;
