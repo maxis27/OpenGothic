@@ -458,6 +458,15 @@ class Npc final {
     // multiplayer client: the npc plays the animations the host's copy plays (MP-20), now after was. An animation
     // drawing or putting away a weapon is played by drawWeaponMelee and the like, which put the weapon in hand too.
     void      netPlayAnims(const std::vector<std::string>& was, const std::vector<std::string>& now, BodyState bs);
+    // an item of the inventory was used (eaten, drunk, read) and changed the hit points by hp and the maximum by
+    // hpMax; in multiplayer the local hero's use is sent to the other players (MP-22)
+    void      onItemUsed(size_t cls, int32_t hp, int32_t hpMax);
+    // multiplayer: another player's character plays what its player did with an item (MP-22): picks up the item
+    // lying at at, drops one, uses item cls (the item's effect runs only for the player's own character: the copy
+    // plays the animation and takes the change of hit points over, see onItemUsed)
+    void      netTakeItemAnim(const Tempest::Vec3& at);
+    void      netDropItemAnim();
+    bool      netUseItem(size_t cls, int32_t hp, int32_t hpMax);
     // multiplayer: the character of a player (the local hero or another player's), not an npc
     bool      isNetPlayer() const;
     bool      isTargetableBySpell(TargetType t) const;

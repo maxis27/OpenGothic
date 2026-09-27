@@ -601,11 +601,9 @@ bool Npc::checkHealth(bool onChange, bool allowUnconscious) {
 
 void Npc::onNoHealth(bool death, HitSound sndMask) {
   invent.switchActiveWeapon(*this,Item::NSLOT);
-  if(!isNetPlayer()) {
-    // a player's character keeps its weapons: items on the ground aren't shared yet (MP-22)
-    visual.dropWeapon(*this);
-    visual.dropShield(*this);
-    }
+  // in multiplayer only the player's own world drops a player's weapons, the host puts them down (World::dropItem)
+  visual.dropWeapon(*this);
+  visual.dropShield(*this);
   dropTorch();
   visual.setToFightMode(WeaponState::NoWeapon);
   updateWeaponSkeleton();
@@ -888,7 +886,7 @@ void Npc::dropTorch(bool burnout) {
     if(leftHand<visual.pose().boneCount())
       mat = visual.pose().bone(leftHand);
 
-    owner.addItemDyn(torchId,mat,hnpc->symbol_index());
+    owner.dropItem(*this,torchId,1,mat,false);
     }
   }
 
@@ -2231,6 +2229,47 @@ void Npc::netRespawn(const Vec3& pos, float rotation) {
   setAnim(Anim::NoAnim); // out of the pose of the dead
   setAnim(Anim::Idle);
   updateTransform();
+  }
+
+void Npc::onItemUsed(size_t cls, int32_t hp, int32_t hpMax) {
+  if(!isPlayer() || !Gothic::inst().isMultiplayer())
+    return;
+  NetProtocol::PlayerItem e;
+  e.move     = NetProtocol::ItemMove::Use;
+  e.instance = uint32_t(cls);
+  e.count    = 1;
+  e.hp       = hp;
+  e.hpMax    = hpMax;
+  owner.addNetItemEvent(e);
+  }
+
+void Npc::netTakeItemAnim(const Vec3& at) {
+  if(isDown() || interactive()!=nullptr)
+    return;
+  setAnimAngGet(Anim::ItmGet, Pose::calcAniCombVert(at-centerPosition()));
+  }
+
+void Npc::netDropItemAnim() {
+  if(isDown() || interactive()!=nullptr)
+    return;
+  setAnim(Anim::ItmDrop);
+  }
+
+bool Npc::netUseItem(size_t cls, int32_t hp, int32_t hpMax) {
+  if(isDown())
+    return false;
+  auto& atr = hnpc->attribute;
+  atr[ATR_HITPOINTSMAX] = std::max(atr[ATR_HITPOINTSMAX]+hpMax, 1);
+  atr[ATR_HITPOINTS]    = std::clamp(atr[ATR_HITPOINTS]+hp, 1, atr[ATR_HITPOINTSMAX]); // only the host's Hit kills
+
+  // the copy has no inventory of its own (MP-23): the item is given to it for the animation, which uses it up
+  Item* it = invent.getItem(cls);
+  if(it==nullptr)
+    it = addItem(cls,1);
+  if(it==nullptr || !setAnimItem(it->handle().scheme_name,-1))
+    return false;
+  invent.setCurrentItem(cls);
+  return true;
   }
 
 void Npc::netAnims(std::vector<std::string>& out, size_t max, size_t maxLength) const {
@@ -3646,6 +3685,28 @@ Item* Npc::takeItem(Item& item) {
   if(sq==nullptr)
     return nullptr;
 
+  if(Gothic::inst().isNetClient()) {
+    // only the host can give it (MP-22): held aside until it answers, see NetWorldSync
+    Item* it = isPlayer() ? owner.netTakeItem(item) : nullptr;
+    if(it!=nullptr)
+      implAniWait(uint64_t(sq->totalTime()));
+    return it;
+    }
+  if(isPlayer() && Gothic::inst().isMultiplayer()) {
+    // the other players see the hero pick it up; their worlds lose the item with the host's
+    if(auto id = owner.netEntities().id(item)) {
+      NetProtocol::PlayerItem e;
+      e.move     = NetProtocol::ItemMove::Take;
+      e.item     = id.value;
+      e.instance = uint32_t(item.clsId());
+      e.count    = uint32_t(std::clamp<size_t>(item.count(), 1, NetProtocol::MaxItemCount));
+      e.x        = item.position().x;
+      e.y        = item.position().y;
+      e.z        = item.position().z;
+      owner.addNetItemEvent(e);
+      }
+    }
+
   std::unique_ptr<Item> ptr = owner.takeItem(item);
   if(ptr!=nullptr && ptr->isTorchBurn()) {
    if(!toggleTorch())
@@ -3736,8 +3797,7 @@ void Npc::dropItem(size_t id, size_t count) {
   if(rightHand<visual.pose().boneCount())
     mat = visual.pose().bone(rightHand);
 
-  auto it = owner.addItemDyn(id,mat,hnpc->symbol_index());
-  it->setCount(count);
+  owner.dropItem(*this,id,count,mat,true);
   invent.delItem(id,count,*this);
   }
 

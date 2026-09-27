@@ -124,6 +124,7 @@ class World final {
       uint32_t        ranged   = uint32_t(-1);
       uint32_t        spell    = uint32_t(-1); // rune or scroll of the last state given to npc, -1: none yet
       std::deque<NetProtocol::PlayerAttack> attacks; // received, waiting for the playback of motion to reach them
+      std::deque<NetProtocol::PlayerItem>   items;   // likewise: items taken, dropped, used (MP-22)
       bool            unconscious = false; // the player's own character was unconscious in the last state played back
       };
     auto                 remotePlayers() const -> const std::vector<RemotePlayer>& { return remotePl; }
@@ -139,7 +140,8 @@ class World final {
     // Multiplayer client: spawns an npc of the host's world (NetProtocol::SpawnEntity) as a NetProxy npc, the
     // only way a client gets npcs: addNpc refuses there (MP-19). Returns nullptr for an unknown instance.
     Npc*                 addNetNpc(size_t npcInstance, const Tempest::Vec3& pos, float rotation);
-    // multiplayer client: NetSession::entitiesVersion() the npcs of this world were last brought in line with
+    // multiplayer client: NetSession::entitiesVersion() the npcs and items of this world were last brought in line
+    // with; uint64_t(-1) to have them checked again
     uint64_t             netNpcsVersion() const { return netNpcsVer; }
     void                 setNetNpcsVersion(uint64_t v) { netNpcsVer = v; }
     // multiplayer client: how the npcs of the host's world are played back (MP-20), by network id
@@ -211,6 +213,30 @@ class World final {
     Item*                addItem    (const zenkit::VItem& vob);
     Item*                addItem    (size_t itemInstance, const Tempest::Vec3&      pos);
     Item*                addItemDyn (size_t itemInstance, const Tempest::Matrix4x4& pos, size_t owner);
+    // On a multiplayer client the four above add nothing and return nullptr: the host has the items on the
+    // ground, the client only the ones it spawns (addNetItem, MP-22).
+
+    // npc drops count of an item from its inventory (taking it out is up to the caller); animated: it plays the drop
+    // animation. In multiplayer, what the local hero drops is sent (takeNetItemEvents); only the host puts it down:
+    // returns nullptr on a client and for the characters of other players.
+    Item*                dropItem   (Npc& from, size_t itemInstance, size_t count, const Tempest::Matrix4x4& pos, bool animated);
+    // Multiplayer client: spawns an item on the ground of the host's world (NetProtocol::SpawnEntity); dynamic: a
+    // dropped one, which falls. Returns nullptr for an unknown instance.
+    Item*                addNetItem (size_t itemInstance, const Tempest::Matrix4x4& pos, size_t count, bool dynamic,
+                                     size_t owner = size_t(-1));
+    // Multiplayer client: the local hero takes item from the ground. Only the host can give it, so the item is held
+    // aside until the host answers (takeNetTake) and the request is sent (takeNetItemEvents). nullptr: not an item
+    // of the host's world.
+    Item*                netTakeItem(Item& item);
+    // multiplayer client: the item the local hero is taking with network id itemId, gone from the ones held aside
+    auto                 takeNetTake(uint32_t itemId) -> std::unique_ptr<Item>;
+    bool                 isNetTake(uint32_t itemId) const { return netTakes.count(itemId)>0; }
+    void                 clearNetTakes();
+    // Multiplayer: what the local hero has done with items (taken, dropped, used), for NetWorldSync to send;
+    // kept until taken, at most MaxNetHits of them. entityId and playerId are filled in by the sender.
+    void                 addNetItemEvent(const NetProtocol::PlayerItem& e);
+    auto                 takeNetItemEvents() -> std::vector<NetProtocol::PlayerItem>;
+    size_t               itemCount() const;
     auto                 takeItem   (Item& it) -> std::unique_ptr<Item>;
     void                 removeItem (Item& it);
     size_t               hasItems(std::string_view tag, size_t itemCls);
@@ -264,6 +290,7 @@ class World final {
     Npc*                                  npcPlayer=nullptr;
     std::vector<RemotePlayer>             remotePl;
     std::vector<NetProtocol::Hit>         netHits;
+    std::vector<NetProtocol::PlayerItem>  netItemEvents;
     uint64_t                              netNpcsVer = uint64_t(-1);
     std::map<uint32_t,NetNpc>             netNpcMotion;
 
@@ -273,6 +300,8 @@ class World final {
     WorldSound                            wsound;
     WorldObjects                          wobj;
     std::unique_ptr<Npc>                  lvlInspector;
+    // multiplayer client: items the local hero is taking, by network id, until the host answers
+    std::map<uint32_t,std::unique_ptr<Item>> netTakes;
 
     auto         roomAt(const zenkit::BspNode &node) -> std::string_view;
     auto         portalAt(std::string_view tag) -> BspSector*;

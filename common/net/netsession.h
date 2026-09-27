@@ -87,6 +87,20 @@ class NetSession final {
     // Client: hits received from the host since the last call, oldest first.
     auto     takeHits() -> std::vector<Hit>;
 
+    // What the players' characters do with items (MP-22). Every player sends what its own character does, the
+    // host relays it to the others (for the animations) and alone changes what lies on the ground.
+    using PlayerItem = NetProtocol::PlayerItem;
+    using ItemTaken  = NetProtocol::ItemTaken;
+    // Sends what this player's character did with an item (playerId and time are filled in here);
+    // false when offline.
+    bool     sendItem(const PlayerItem& e);
+    // What the other players' characters did with items since the last call, oldest first.
+    auto     takeItems() -> std::vector<PlayerItem>;
+    // Host: the answer to a Take of player pid. Ignored on a client and for players not in the session.
+    void     answerTake(PlayerId pid, const ItemTaken& answer);
+    // Client: the host's answers to this player's Takes since the last call, oldest first.
+    auto     takeAnswers() -> std::vector<ItemTaken>;
+
     // Time of day in the host's world (gtime::toInt()): the host owns the clock, the clients follow.
     // at most this often the host sends its time while the clock runs normally
     static constexpr uint64_t WorldTimeIntervalMs = 1000;
@@ -99,9 +113,11 @@ class NetSession final {
     // Client: the host's time received since the last call, nothing when none came.
     auto     takeWorldTime() -> std::optional<int64_t>;
 
-    // Npcs of the host's world (MP-19): the host has them all, the clients create only the ones the host spawns.
+    // Npcs and items on the ground of the host's world (MP-19, MP-22): the host has them all, the clients create
+    // only the ones the host spawns.
     using Entity = NetProtocol::SpawnEntity;
-    // Host: every npc of its world other than the players' characters, called every frame. The clients are
+    // Host: every npc of its world other than the players' characters and every item on the ground, called every
+    // frame. The clients are
     // sent the ones they don't have yet (a new id, or an id now naming another instance) and told which are
     // gone; the rest only keeps what newcomers get right after Welcome up to date. Ignored on a client.
     void     setEntities(std::vector<Entity> list);
@@ -155,6 +171,7 @@ class NetSession final {
 
     void     onPlayerState(PlayerId from, NetProtocol::PlayerState s, NetTransport::PeerId peer);
     void     onAttack     (PlayerId from, NetProtocol::PlayerAttack a, NetTransport::PeerId peer);
+    void     onItem       (PlayerId from, NetProtocol::PlayerItem e, NetTransport::PeerId peer);
     void     forgetPlayer (PlayerId id);
     void     clearWorld   ();
 
@@ -180,6 +197,8 @@ class NetSession final {
     uint64_t                                         stateSent = 0;
     std::vector<PlayerAttack>                        attacks;
     std::vector<Hit>                                 hits;
+    std::vector<PlayerItem>                          itemEvents;
+    std::vector<ItemTaken>                           answers;
     std::vector<Avatar>                              respawns;
     std::map<uint32_t,Entity>                        entityMap;
     uint64_t                                         entityVersion = 0;

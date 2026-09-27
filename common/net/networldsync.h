@@ -28,11 +28,20 @@ class World;
 //    They run no AI (NetProxy): the host sends what its npcs near each player do (NpcStates: position, walk
 //    mode, weapon, the animations playing, so routines as much as walks and blows), changes only, and the
 //    clients play it back like the players' characters (MP-20);
+//  - the items on the ground are the host's too (MP-22): the clients have only the ones it spawns, none of their own
+//    (World::addItem). A player picking one up asks the host, which grants it to the first one only and despawns it
+//    for everyone; until then the item is held aside. What a player drops (a weapon falling from its hand too) is
+//    put down by the host where the player dropped it. Using an item (eating, drinking) is sent as its animation
+//    starts; the item's effect runs only for the player's own character, its copies take the change of hit points
+//    over. The copies play the animations of all of it at the moment of the player's movement it was done in;
 //  - the host sends the time of day of its world, the clients take it over (MP-12);
 //  - characters of players who left are removed, all of them once the session is gone.
 // Called every frame. A newly loaded world has no remote players yet and is filled again.
 namespace NetWorldSync {
   // how long a player's character lies dead before the host brings it back
   constexpr uint64_t RespawnDelayMs = 5000;
+  // how far from another player's character (on the host, which sees it a little late) an item it takes or drops can
+  // be, cm
+  constexpr float    ItemReach      = 1000.f;
   void tick(NetSession* session, World& world);
   }

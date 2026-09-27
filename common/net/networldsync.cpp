@@ -133,11 +133,24 @@ void tickClient(NetSession& session, World& world) {
     }
   }
 
-// host: the npcs of its world, for the clients to have them too (MP-19)
-void sendNpcs(NetSession& session, World& world) {
+// the matrix of an item on the ground, sent as position and axes
+Matrix4x4 itemMatrix(float x, float y, float z, const NetProtocol::ItemAxes& axes) {
+  Matrix4x4 m;
+  m.identity();
+  for(int c=0; c<3; ++c)
+    for(int r=0; r<3; ++r)
+      m.set(c, r, axes[size_t(c*3+r)]);
+  m.set(3, 0, x);
+  m.set(3, 1, y);
+  m.set(3, 2, z);
+  return m;
+  }
+
+// host: the npcs and the items on the ground of its world, for the clients to have them too (MP-19, MP-22)
+void sendEntities(NetSession& session, World& world) {
   auto& ids = world.netEntities();
   std::vector<NetSession::Entity> list;
-  list.reserve(world.npcCount());
+  list.reserve(world.npcCount() + world.itemCount());
   for(uint32_t i=0; i<world.npcCount(); ++i) {
     Npc& npc = *world.npcById(i);
     const NetEntityId id = ids.id(npc);
@@ -159,7 +172,67 @@ void sendNpcs(NetSession& session, World& world) {
       e.flags = NetSession::Entity::Unconscious;
     list.push_back(e);
     }
+  for(uint32_t i=0; i<world.itemCount(); ++i) {
+    Item& it = *world.itmById(i);
+    const NetEntityId id = ids.id(it);
+    if(!id)
+      continue;
+    // where it lies now: a newcomer gets it there, the others let it fall on their own
+    auto& m = it.transform();
+    NetSession::Entity e;
+    e.entityId = id.value;
+    e.kind     = NetProtocol::EntityKind::Item;
+    e.instance = uint32_t(it.clsId());
+    e.x        = m.at(3,0);
+    e.y        = m.at(3,1);
+    e.z        = m.at(3,2);
+    e.count    = uint32_t(std::clamp<size_t>(it.count(), 1, NetProtocol::MaxItemCount));
+    for(int c=0; c<3; ++c)
+      for(int r=0; r<3; ++r)
+        e.axes[size_t(c*3+r)] = m.at(c,r);
+    if(it.isDynamic())
+      e.flags = NetSession::Entity::Dynamic;
+    list.push_back(e);
+    }
   session.setEntities(std::move(list));
+  }
+
+// client: has the items on the ground the host has spawned, and no others (World::addItem refuses on a client);
+// the ones the local hero is taking are held aside until the host answers (MP-22)
+void receiveGroundItems(NetSession& session, World& world) {
+  auto& ids  = world.netEntities();
+  auto& list = session.entities();
+
+  std::vector<Item*> gone;
+  for(uint32_t i=0; i<world.itemCount(); ++i) {
+    Item& it = *world.itmById(i);
+    const NetEntityId id = ids.id(it);
+    if(!id)
+      continue;
+    auto e = list.find(id.value);
+    if(e==list.end() || e->second.kind!=NetProtocol::EntityKind::Item || e->second.instance!=it.clsId())
+      gone.push_back(&it);
+    }
+  for(auto* it:gone)
+    world.removeItem(*it);
+
+  for(auto& [eid,e]:list) {
+    const NetEntityId id{eid};
+    if(e.kind!=NetProtocol::EntityKind::Item || ids.item(id)!=nullptr || world.isNetTake(eid))
+      continue;
+    if(!isItemInstance(world, e.instance)) {
+      Log::e("multiplayer: unknown item instance ", e.instance, " of entity ", eid);
+      continue;
+      }
+    Item* it = world.addNetItem(e.instance, itemMatrix(e.x, e.y, e.z, e.axes), e.count,
+                                (e.flags & NetSession::Entity::Dynamic)!=0);
+    if(it==nullptr)
+      continue;
+    if(!ids.bind(id, *it)) {
+      Log::e("multiplayer: network id ", eid, " of item ", it->displayName(), " is taken");
+      world.removeItem(*it);
+      }
+    }
   }
 
 // client: has the npcs the host has spawned, and no others (World::addNpc refuses on a client)
@@ -177,7 +250,7 @@ void receiveNpcs(NetSession& session, World& world) {
     if(!id || npc.isNetPlayer())
       continue;
     auto it = list.find(id.value);
-    if(it==list.end() || it->second.instance!=npc.instanceSymbol())
+    if(it==list.end() || it->second.kind!=NetProtocol::EntityKind::Npc || it->second.instance!=npc.instanceSymbol())
       gone.push_back(&npc);
     }
   for(auto* npc:gone)
@@ -185,7 +258,7 @@ void receiveNpcs(NetSession& session, World& world) {
 
   for(auto& [eid,e]:list) {
     const NetEntityId id{eid};
-    if(ids.npc(id)!=nullptr)
+    if(e.kind!=NetProtocol::EntityKind::Npc || ids.npc(id)!=nullptr)
       continue; // spawned already; where it goes from there is MP-20
     if(!isInstanceOf(world, e.instance, "C_NPC")) {
       Log::e("multiplayer: unknown npc instance ", e.instance, " of entity ", eid);
@@ -207,6 +280,7 @@ void receiveNpcs(NetSession& session, World& world) {
     else if(e.flags & NetSession::Entity::Unconscious)
       npc->netDown(false);
     }
+  receiveGroundItems(session, world);
   world.setNetNpcsVersion(session.entitiesVersion());
   }
 
@@ -434,6 +508,122 @@ void receiveAttacks(NetSession& session, World& world) {
     }
   }
 
+// what the local hero has done with items, for the other players' copies and, on a client, for the host to take the
+// item from the ground or put it down (MP-22)
+void sendItems(NetSession& session, World& world) {
+  const NetEntityId id = world.netEntities().id(*world.player());
+  for(auto& e:world.takeNetItemEvents()) {
+    NetSession::PlayerItem msg = e;
+    msg.entityId = id.value;
+    if(!id || !session.sendItem(msg)) {
+      if(e.move==NetProtocol::ItemMove::Take)
+        world.takeNetTake(e.item); // nobody to ask for it: it's lost like the item a dead host would drop
+      }
+    }
+  }
+
+// host: the item is on the ground near the character of another player, who asks for it or has put it there
+bool isInReach(const Npc& npc, const Vec3& at) {
+  const float reach = NetWorldSync::ItemReach;
+  return (npc.position()-at).quadLength()<=reach*reach;
+  }
+
+// host: takes the item from the ground for the character of another player, if it is still there and near it
+bool hostTake(World& world, Npc& npc, const NetSession::PlayerItem& e) {
+  Item* it = world.netEntities().item(NetEntityId{e.item});
+  if(it==nullptr)
+    return false; // somebody else was quicker
+  if(!isInReach(npc, it->position())) {
+    Log::i("multiplayer: ", npc.displayName(), " is too far away to take ", it->displayName());
+    return false;
+    }
+  // the player puts it into its own inventory; the copy's isn't kept in line with it yet (MP-23)
+  world.removeItem(*it);
+  return true;
+  }
+
+// host: puts down what another player has dropped where the player dropped it; the clients get it as an entity
+void hostDrop(World& world, Npc& npc, const NetSession::PlayerItem& e) {
+  if(!isItemInstance(world, e.instance)) {
+    Log::e("multiplayer: unknown item ", e.instance, " dropped by ", npc.displayName());
+    return;
+    }
+  if(!isInReach(npc, Vec3(e.x, e.y, e.z))) {
+    Log::i("multiplayer: ", npc.displayName(), " dropped an item too far away");
+    return;
+    }
+  world.addNetItem(e.instance, itemMatrix(e.x, e.y, e.z, e.axes), e.count, true, npc.handle().symbol_index());
+  }
+
+// what the other players did with items: on the host their takes and drops change the ground, and every world
+// queues the animations on the players' characters until the playback reaches them
+void receiveItems(NetSession& session, World& world) {
+  // few are ever waiting: more are left from a character the host has replaced
+  constexpr size_t MaxWaiting = 16;
+  auto& ids = world.netEntities();
+  for(auto& e:session.takeItems()) {
+    Npc* npc = world.remotePlayer(e.playerId);
+    if(npc==nullptr || ids.id(*npc)!=NetEntityId{e.entityId}) {
+      if(session.isHost() && e.move==NetProtocol::ItemMove::Take)
+        session.answerTake(e.playerId, {e.item, false});
+      continue;
+      }
+    if(session.isHost()) {
+      if(e.move==NetProtocol::ItemMove::Take)
+        session.answerTake(e.playerId, {e.item, hostTake(world, *npc, e)});
+      else if(e.move==NetProtocol::ItemMove::Drop)
+        hostDrop(world, *npc, e);
+      }
+    for(auto& r:world.remotePlayers()) {
+      if(r.npc!=npc)
+        continue;
+      if(r.items.size()>=MaxWaiting)
+        r.items.pop_front();
+      r.items.push_back(e);
+      }
+    }
+  }
+
+// client: the host's answers to the local hero's takes; a granted item goes into the hero's inventory
+void receiveAnswers(NetSession& session, World& world) {
+  auto& pl = *world.player();
+  for(auto& a:session.takeAnswers()) {
+    auto it = world.takeNetTake(a.item);
+    if(it==nullptr)
+      continue;
+    if(!a.granted) {
+      // gone, or still there if the host found the hero too far away: the ground is checked again
+      world.setNetNpcsVersion(uint64_t(-1));
+      continue;
+      }
+    if(it->isTorchBurn()) {
+      pl.toggleTorch(); // a burning torch is taken into the hand, like in Npc::takeItem
+      continue;
+      }
+    pl.addItem(std::move(it));
+    }
+  }
+
+// the other player's character does with an item what the player did, the item's effect (Use) aside
+void replayItem(World& world, Npc& npc, const NetSession::PlayerItem& e) {
+  using M = NetProtocol::ItemMove;
+  switch(e.move) {
+    case M::Take:
+      npc.netTakeItemAnim(Vec3(e.x, e.y, e.z));
+      break;
+    case M::Drop:
+      if(e.flags & NetSession::PlayerItem::Animated)
+        npc.netDropItemAnim();
+      break;
+    case M::Use:
+      if(!isItemInstance(world, e.instance))
+        Log::e("multiplayer: unknown item ", e.instance, " used by ", npc.displayName());
+      else
+        npc.netUseItem(e.instance, e.hp, e.hpMax);
+      break;
+    }
+  }
+
 // the other player's character does what the player did; on the host its blow or arrow deals the damage,
 // on a client only the host's Hit does (Npc::isNetHit)
 void replayAttack(World& world, Npc& npc, const NetSession::PlayerAttack& a) {
@@ -576,9 +766,12 @@ void applyAnim(World::RemotePlayer& r, const NetSession::PlayerState& s, float t
 
   // standing still doesn't cut a blow short, like in PlayerMovement::implMove; while the player charges or
   // casts a spell (animations started by the spell, not by setAnim) its character keeps the spell's animation
+  const auto bs      = BodyState(s.bodyState & BS_MAX);
   const bool blow    = s.anim==AnimationSolver::Anim::Idle && npc.isAttackAnim();
-  const bool casting = BodyState(s.bodyState & BS_MAX)==BS_CASTING;
-  if(isMovementAnim(s.anim) && (s.anim!=r.anim || isMovementLoop(s.anim)) && !blow && !casting)
+  const bool casting = bs==BS_CASTING;
+  // likewise while it eats, drinks or picks something up: that animation is started by the item (MP-22)
+  const bool item    = bs==BodyState(BS_ITEMINTERACT & BS_MAX) || bs==BS_TAKEITEM || bs==BS_DROPITEM;
+  if(isMovementAnim(s.anim) && (s.anim!=r.anim || isMovementLoop(s.anim)) && !blow && !casting && !item)
     npc.setAnim(AnimationSolver::Anim(s.anim));
   r.anim = s.anim;
 
@@ -706,6 +899,7 @@ void applyStates(NetSession& session, World& world) {
       if(auto last = r.motion.newest(); last!=nullptr && last->entityId!=s->entityId) {
         r.motion.clear(); // the host has replaced the character: forget the old one's way
         r.attacks.clear();
+        r.items.clear();
         }
       r.motion.push(*s, now); // the same state again is ignored
       }
@@ -725,6 +919,10 @@ void applyStates(NetSession& session, World& world) {
     r.npc->setDirection(cur.rotation);
     if(!applyDown(r, *cur.state)) {
       r.attacks.clear(); // blows the character was about to deal before it fell
+      r.items.clear();
+      // it has dropped its weapons (Npc::onNoHealth); up again, it gets the ones its player still has
+      r.melee  = uint32_t(-1);
+      r.ranged = uint32_t(-1);
       continue;
       }
     applyEquipment(world, r, *cur.state);
@@ -737,6 +935,10 @@ void applyStates(NetSession& session, World& world) {
     while(!r.attacks.empty() && int64_t(r.attacks.front().time)<=t) {
       replayAttack(world, *r.npc, r.attacks.front());
       r.attacks.pop_front();
+      }
+    while(!r.items.empty() && int64_t(r.items.front().time)<=t) {
+      replayItem(world, *r.npc, r.items.front());
+      r.items.pop_front();
       }
     }
   }
@@ -755,18 +957,24 @@ void NetWorldSync::tick(NetSession* session, World& world) {
 
   if(!online || world.player()==nullptr) {
     world.takeNetHits(); // nobody to send them to
+    world.takeNetItemEvents();
+    world.clearNetTakes();
     return;
     }
   if(session->isHost()) {
     tickHost(*session, world);
-    sendNpcs(*session, world);
+    receiveItems(*session, world); // before sendEntities: the items taken go out with it
+    sendEntities(*session, world);
     sendNpcStates(*session, world);
     } else {
     tickClient(*session, world);
+    receiveAnswers(*session, world);
     receiveNpcs(*session, world);
     receiveNpcStates(*session, world);
     applyNpcStates(world);
+    receiveItems(*session, world);
     }
+  sendItems  (*session, world);
   syncTime   (*session, world);
   sendState  (*session, world);
   sendAttacks(*session, world);
