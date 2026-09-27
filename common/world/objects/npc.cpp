@@ -2262,7 +2262,8 @@ bool Npc::netUseItem(size_t cls, int32_t hp, int32_t hpMax) {
   atr[ATR_HITPOINTSMAX] = std::max(atr[ATR_HITPOINTSMAX]+hpMax, 1);
   atr[ATR_HITPOINTS]    = std::clamp(atr[ATR_HITPOINTS]+hp, 1, atr[ATR_HITPOINTSMAX]); // only the host's Hit kills
 
-  // the copy has no inventory of its own (MP-23): the item is given to it for the animation, which uses it up
+  // the copy has its player's items (MP-23), but the player may have used the last one up by now: it is given to it
+  // for the animation, which uses it up, and the next inventory of the player puts the count right
   Item* it = invent.getItem(cls);
   if(it==nullptr)
     it = addItem(cls,1);
@@ -4483,7 +4484,7 @@ bool Npc::netReleaseSpell(size_t spellItem) {
 bool Npc::netCastSpell(size_t spellItem, int32_t level, Npc* target, const Vec3& dir) {
   auto itm = invent.getItem(spellItem);
   if(itm==nullptr)
-    itm = addItem(spellItem,1); // a scroll the character has used up, or never had (items belong to MP-22)
+    itm = addItem(spellItem,1); // a scroll the player's inventory (MP-23) has used up already
   if(itm==nullptr || !itm->isSpellOrRune())
     return false;
 

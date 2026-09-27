@@ -130,8 +130,6 @@ void write(Writer& w, const PlayerState& m) {
   w.u16(m.anim);
   w.u8 (m.walkMode);
   w.u8 (m.weaponState);
-  w.u32(m.meleeWeapon);
-  w.u32(m.rangedWeapon);
   w.u32(m.spell);
   }
 
@@ -236,6 +234,22 @@ void write(Writer& w, const ItemTaken& m) {
   w.u8 (m.granted ? 1 : 0);
   }
 
+void write(Writer& w, const PlayerInventory& m) {
+  const size_t count = m.items.size()<MaxInventoryItems ? m.items.size() : MaxInventoryItems;
+  w.u8 (uint8_t(MsgType::PlayerInventory));
+  w.u32(m.playerId);
+  w.u32(m.entityId);
+  w.u32(m.time);
+  w.u16(uint16_t(count));
+  for(size_t i=0; i<count; ++i) {
+    auto& it = m.items[i];
+    w.u32(it.instance);
+    w.u32(it.count);
+    w.u8 (it.equipped ? 1 : 0);
+    w.u8 (it.slot);
+    }
+  }
+
 std::optional<Message> readHello(Reader& r) {
   Hello    m;
   uint32_t magic = 0;
@@ -300,7 +314,7 @@ std::optional<Message> readPlayerState(Reader& r) {
   if(!r.u32(m.playerId) || !r.u32(m.entityId) || m.entityId==0 || !r.u32(m.seq) || !r.u32(m.time) ||
      !r.f32(m.x) || !r.f32(m.y) || !r.f32(m.z) || !r.f32(m.rotation) ||
      !r.u32(m.bodyState) || !r.u16(m.anim) || !r.u8(m.walkMode) || !r.u8(m.weaponState) ||
-     !r.u32(m.meleeWeapon) || !r.u32(m.rangedWeapon) || !r.u32(m.spell) || !r.atEnd())
+     !r.u32(m.spell) || !r.atEnd())
     return std::nullopt;
   return m;
   }
@@ -417,6 +431,31 @@ std::optional<Message> readItemTaken(Reader& r) {
   return m;
   }
 
+std::optional<Message> readPlayerInventory(Reader& r) {
+  PlayerInventory m;
+  uint16_t        count = 0;
+  if(!r.u32(m.playerId) || !r.u32(m.entityId) || m.entityId==0 || !r.u32(m.time) ||
+     !r.u16(count) || count>MaxInventoryItems)
+    return std::nullopt;
+  m.items.resize(count);
+  for(size_t i=0; i<m.items.size(); ++i) {
+    auto&   it       = m.items[i];
+    uint8_t equipped = 0;
+    if(!r.u32(it.instance) || it.instance==0 || !r.u32(it.count) || it.count==0 || it.count>MaxInventoryCount ||
+       !r.u8(equipped) || equipped>1 || !r.u8(it.slot))
+      return std::nullopt;
+    it.equipped = equipped!=0;
+    // sorted, so that every instance comes once
+    if(i>0 && m.items[i-1].instance>=it.instance)
+      return std::nullopt;
+    if(it.slot!=0 && (!it.equipped || it.slot<FirstSpellSlot || it.slot>=FirstSpellSlot+SpellSlots))
+      return std::nullopt;
+    }
+  if(!r.atEnd())
+    return std::nullopt;
+  return m;
+  }
+
 std::optional<Message> readNpcStates(Reader& r) {
   NpcStates m;
   uint8_t   count = 0;
@@ -483,6 +522,7 @@ std::optional<Message> NetProtocol::decode(const uint8_t* data, size_t size) {
     case MsgType::NpcStates:    return readNpcStates(r);
     case MsgType::PlayerItem:   return readPlayerItem(r);
     case MsgType::ItemTaken:    return readItemTaken(r);
+    case MsgType::PlayerInventory: return readPlayerInventory(r);
     }
   return std::nullopt;
   }

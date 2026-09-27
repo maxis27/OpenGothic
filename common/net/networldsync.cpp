@@ -10,6 +10,7 @@
 
 #include "game/gamescript.h"
 #include "graphics/mesh/animationsolver.h"
+#include "game/inventory.h"
 #include "world/objects/item.h"
 #include "world/objects/npc.h"
 #include "world/world.h"
@@ -425,13 +426,46 @@ void sendState(NetSession& session, World& world) {
   s.anim        = uint16_t(pl.lastAnim());
   s.walkMode    = uint8_t(pl.walkMode());
   s.weaponState = uint8_t(pl.weaponState());
-  if(auto it = pl.currentMeleeWeapon())
-    s.meleeWeapon = uint32_t(it->clsId());
-  if(auto it = pl.currentRangedWeapon())
-    s.rangedWeapon = uint32_t(it->clsId());
   if(auto it = pl.inventory().activeWeapon(); it!=nullptr && pl.weaponState()==WeaponState::Mage)
     s.spell = uint32_t(it->clsId());
   session.sendPlayerState(s);
+  }
+
+// the items of a character, as PlayerInventory has them: one entry per instance, sorted by instance
+std::vector<NetProtocol::InventoryItem> inventoryItems(const Npc& npc) {
+  std::map<uint32_t,NetProtocol::InventoryItem> all;
+  for(auto i = npc.inventory().iterator(Inventory::T_Inventory); i.isValid(); ++i) {
+    // an equipped item of which the character has more comes twice: the equipped one first
+    auto& e    = all[uint32_t(i->clsId())];
+    e.instance = uint32_t(i->clsId());
+    e.count    = uint32_t(std::min<size_t>(e.count+i.count(), NetProtocol::MaxInventoryCount));
+    if(i.isEquipped()) {
+      e.equipped = true;
+      const uint8_t slot = i.slot();
+      if(slot>=NetProtocol::FirstSpellSlot && slot<NetProtocol::FirstSpellSlot+NetProtocol::SpellSlots)
+        e.slot = slot;
+      }
+    }
+  std::vector<NetProtocol::InventoryItem> ret;
+  ret.reserve(all.size());
+  for(auto& [cls,e]:all) {
+    if(e.count==0 || ret.size()>=NetProtocol::MaxInventoryItems)
+      continue;
+    ret.push_back(e);
+    }
+  return ret;
+  }
+
+// the items of the local hero, for the other players' copies of it; sent when they change (MP-23)
+void sendInventory(NetSession& session, World& world) {
+  auto& pl = *world.player();
+  const NetEntityId id = world.netEntities().id(pl);
+  if(!id)
+    return; // client: the host hasn't announced the hero yet
+  NetSession::PlayerInventory inv;
+  inv.entityId = id.value;
+  inv.items    = inventoryItems(pl);
+  session.sendInventory(inv);
   }
 
 // the move of the last attack started by a character, see Npc::lastAttack and Npc::lastCast
@@ -537,7 +571,7 @@ bool hostTake(World& world, Npc& npc, const NetSession::PlayerItem& e) {
     Log::i("multiplayer: ", npc.displayName(), " is too far away to take ", it->displayName());
     return false;
     }
-  // the player puts it into its own inventory; the copy's isn't kept in line with it yet (MP-23)
+  // the player puts it into its own inventory, which its copies get with its next PlayerInventory (MP-23)
   world.removeItem(*it);
   return true;
   }
@@ -782,54 +816,77 @@ void applyAnim(World::RemotePlayer& r, const NetSession::PlayerState& s, float t
   npc.setAnimRotate(turn);
   }
 
-// gives npc the weapon of the other player in place of the one it has in the slot
-void equipWeapon(World& world, Npc& npc, Item* current, uint32_t symbol, bool drawn, const char* what) {
-  const size_t cur = current!=nullptr ? current->clsId() : size_t(-1);
-  if(cur==symbol)
-    return;
-  if(drawn)
-    npc.closeWeapon(true); // the weapon in hand is about to be taken away
-  if(current!=nullptr)
-    npc.delItem(cur, uint32_t(current->count()));
-  if(symbol==0)
-    return;
-  if(!isItemInstance(world, symbol)) {
-    Log::e("multiplayer: unknown ", what, " ", symbol, " of ", npc.displayName());
-    return;
-    }
-  if(npc.addItem(symbol, 1)!=nullptr)
-    npc.useItem(symbol, Item::NSLOT, true); // no requirements: the other player could equip it
+// items a character wears or has in a weapon slot, which Inventory::use equips rather than uses
+bool isEquippable(const Item& it) {
+  const auto main = ItmFlags(it.mainFlag());
+  const auto flag = ItmFlags(it.handle().flags);
+  return (main & (ITM_CAT_NF | ITM_CAT_FF | ITM_CAT_RUNE | ITM_CAT_ARMOR))!=0 ||
+         (flag & (ITM_SHIELD | ITM_BELT | ITM_AMULET | ITM_RING))!=0;
   }
 
-// equips the weapons the other player has on
-void applyEquipment(World& world, World::RemotePlayer& r, const NetSession::PlayerState& s) {
-  auto&      npc = *r.npc;
-  const auto ws  = npc.weaponState();
-  if(s.meleeWeapon!=r.melee) {
-    equipWeapon(world, npc, npc.currentMeleeWeapon(), s.meleeWeapon,
-                ws==WeaponState::W1H || ws==WeaponState::W2H, "melee weapon");
-    r.melee = s.meleeWeapon;
+// a weapon, rune or scroll in the hand of npc is put away before it is taken or another of its kind is equipped
+void putAway(Npc& npc, const Item& it) {
+  auto kind = [](const Item& i) { return ItmFlags(i.mainFlag()) & (ITM_CAT_NF | ITM_CAT_FF | ITM_CAT_RUNE); };
+  const Item* active = npc.inventory().activeWeapon();
+  if(active==&it || (active!=nullptr && kind(*active)!=0 && kind(*active)==kind(it)))
+    npc.closeWeapon(true); // drawn again by applyWeapon, as the player's state says
+  }
+
+// gives the other player's character the items its player's has (MP-23): what it lacks is made by the scripts of this
+// world from the instance, what the player no longer has goes, and what the player has equipped is equipped (without
+// the requirements: the player could)
+void applyInventory(World& world, Npc& npc, const std::vector<NetProtocol::InventoryItem>& items) {
+  std::map<size_t,size_t> have;
+  for(auto i = npc.inventory().iterator(Inventory::T_Inventory); i.isValid(); ++i)
+    have[i->clsId()] += i.count();
+  std::map<size_t,const NetProtocol::InventoryItem*> want;
+  for(auto& e:items)
+    want[e.instance] = &e;
+
+  // what goes, first: an equipped item makes room for the one the player has in its place
+  for(auto& [cls,count]:have) {
+    Item* it = npc.getItem(cls);
+    if(it==nullptr)
+      continue;
+    auto w = want.find(cls);
+    if(w==want.end()) {
+      putAway(npc, *it);
+      npc.delItem(cls, uint32_t(count));
+      continue;
+      }
+    auto& e = *w->second;
+    if(it->isEquipped() && (!e.equipped || (e.slot!=0 && it->slot()!=e.slot))) {
+      putAway(npc, *it);
+      npc.unequipItem(cls);
+      }
+    if(e.count<count)
+      npc.delItem(cls, uint32_t(count-e.count));
+    else if(e.count>count)
+      npc.addItem(cls, e.count-count);
     }
-  if(s.rangedWeapon!=r.ranged) {
-    equipWeapon(world, npc, npc.currentRangedWeapon(), s.rangedWeapon,
-                ws==WeaponState::Bow || ws==WeaponState::CBow, "ranged weapon");
-    r.ranged = s.rangedWeapon;
-    }
-  if(s.spell!=r.spell) {
-    // the rune or scroll is given to the character to draw it; runes and scrolls it no longer holds are
-    // kept (items belong to MP-22)
-    if(s.spell!=0 && !isItemInstance(world, s.spell))
-      Log::e("multiplayer: unknown spell ", s.spell, " of ", npc.displayName());
-    else if(s.spell!=0 && npc.getItem(s.spell)==nullptr)
-      npc.addItem(s.spell, 1);
-    r.spell = s.spell;
+
+  for(auto& e:items) {
+    if(have.count(e.instance)==0) {
+      if(!isItemInstance(world, e.instance)) {
+        Log::e("multiplayer: unknown item ", e.instance, " in the inventory of ", npc.displayName());
+        continue;
+        }
+      npc.addItem(e.instance, e.count);
+      }
+    if(!e.equipped)
+      continue;
+    Item* it = npc.getItem(e.instance);
+    if(it==nullptr || it->isEquipped() || !isEquippable(*it))
+      continue;
+    putAway(npc, *it);
+    npc.useItem(e.instance, e.slot!=0 ? e.slot : uint8_t(Item::NSLOT), true);
     }
   }
 
 // draws or puts away the weapon as the other player did; a switch can take a few frames (put the old
 // weapon away, then draw the new one), and waits while the character can't switch, so it is repeated
 // until the character is in the state. A spell is drawn when the character has its rune or scroll
-// (applyEquipment)
+// (applyInventory)
 void applyWeapon(Npc& npc, WeaponState want, uint32_t spell) {
   const auto cur   = npc.weaponState();
   const bool melee = cur==WeaponState::W1H || cur==WeaponState::W2H;
@@ -917,21 +974,25 @@ void applyStates(NetSession& session, World& world) {
 
     r.npc->setPosition(cur.x, cur.y, cur.z);
     r.npc->setDirection(cur.rotation);
+    // the items the player had at the moment of its movement played back now
+    int64_t t = 0;
+    r.motion.playbackTime(now, t);
+    if(auto inv = session.takeInventory(r.playerId, t); inv && NetEntityId{inv->entityId}==id) {
+      r.inventory        = std::move(inv->items);
+      r.inventoryApplied = false;
+      }
+
     if(!applyDown(r, *cur.state)) {
       r.attacks.clear(); // blows the character was about to deal before it fell
       r.items.clear();
-      // it has dropped its weapons (Npc::onNoHealth); up again, it gets the ones its player still has
-      r.melee  = uint32_t(-1);
-      r.ranged = uint32_t(-1);
+      // it has dropped its weapons (Npc::onNoHealth); up again, it gets the items its player still has
+      r.inventoryApplied = false;
       continue;
       }
-    applyEquipment(world, r, *cur.state);
     applyWeapon(*r.npc, WeaponState(cur.state->weaponState), cur.state->spell);
     applyAnim(r, *cur.state, turn*1000.f/float(TurnWindow));
 
     // attacks at the moment of the player's movement they were started in, with its weapon drawn
-    int64_t t = 0;
-    r.motion.playbackTime(now, t);
     while(!r.attacks.empty() && int64_t(r.attacks.front().time)<=t) {
       replayAttack(world, *r.npc, r.attacks.front());
       r.attacks.pop_front();
@@ -939,6 +1000,12 @@ void applyStates(NetSession& session, World& world) {
     while(!r.items.empty() && int64_t(r.items.front().time)<=t) {
       replayItem(world, *r.npc, r.items.front());
       r.items.pop_front();
+      }
+    // after them: a player sends its items after the arrow it has shot or the item it has used up in that frame,
+    // which the copy has just shot or started using too (and anyway counts are the player's again next time)
+    if(r.inventory && !r.inventoryApplied) {
+      applyInventory(world, *r.npc, *r.inventory);
+      r.inventoryApplied = true;
       }
     }
   }
@@ -975,6 +1042,7 @@ void NetWorldSync::tick(NetSession* session, World& world) {
     receiveItems(*session, world);
     }
   sendItems  (*session, world);
+  sendInventory(*session, world);
   syncTime   (*session, world);
   sendState  (*session, world);
   sendAttacks(*session, world);

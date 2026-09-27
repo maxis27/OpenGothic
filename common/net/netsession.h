@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
@@ -101,6 +102,21 @@ class NetSession final {
     // Client: the host's answers to this player's Takes since the last call, oldest first.
     auto     takeAnswers() -> std::vector<ItemTaken>;
 
+    // Inventories of the players' characters (MP-23). Every player sends its own character's, the host relays them to
+    // the others and keeps the latest of each player for newcomers.
+    using PlayerInventory = NetProtocol::PlayerInventory;
+    // at most this often a player's inventory is sent while it keeps changing
+    static constexpr uint64_t InventoryIntervalMs = 100;
+    // inventories received and not taken yet, per player; the oldest go
+    static constexpr size_t   MaxPendingInventories = 16;
+    // Sends the inventory of this player's character (playerId and time are filled in here), called every frame: it is
+    // sent when its items or its entityId differ from the last one sent and InventoryIntervalMs have passed since
+    // then; false when not sent.
+    bool     sendInventory(const PlayerInventory& inv);
+    // The newest inventory of player id received with a time up to upTo (the sender's clock, like
+    // PlayerState::time), nothing when none; the older ones up to upTo are dropped with it.
+    auto     takeInventory(PlayerId id, int64_t upTo) -> std::optional<PlayerInventory>;
+
     // Time of day in the host's world (gtime::toInt()): the host owns the clock, the clients follow.
     // at most this often the host sends its time while the clock runs normally
     static constexpr uint64_t WorldTimeIntervalMs = 1000;
@@ -172,6 +188,7 @@ class NetSession final {
     void     onPlayerState(PlayerId from, NetProtocol::PlayerState s, NetTransport::PeerId peer);
     void     onAttack     (PlayerId from, NetProtocol::PlayerAttack a, NetTransport::PeerId peer);
     void     onItem       (PlayerId from, NetProtocol::PlayerItem e, NetTransport::PeerId peer);
+    void     onInventory  (PlayerId from, NetProtocol::PlayerInventory inv, NetTransport::PeerId peer);
     void     forgetPlayer (PlayerId id);
     void     clearWorld   ();
 
@@ -200,6 +217,11 @@ class NetSession final {
     std::vector<PlayerItem>                          itemEvents;
     std::vector<ItemTaken>                           answers;
     std::vector<Avatar>                              respawns;
+    // received inventories not taken yet (oldest first), and on the host the latest of every player, its own included
+    std::map<PlayerId,std::deque<PlayerInventory>>   inventories;
+    std::map<PlayerId,PlayerInventory>               latestInventory;
+    std::optional<PlayerInventory>                   inventorySent;
+    uint64_t                                         inventorySentAt = 0;
     std::map<uint32_t,Entity>                        entityMap;
     uint64_t                                         entityVersion = 0;
     // host: what each client has been sent of each npc; client: the npc states not taken yet

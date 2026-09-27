@@ -34,6 +34,10 @@ class World;
 //    put down by the host where the player dropped it. Using an item (eating, drinking) is sent as its animation
 //    starts; the item's effect runs only for the player's own character, its copies take the change of hit points
 //    over. The copies play the animations of all of it at the moment of the player's movement it was done in;
+//  - every player sends the items of its own character when they change (MP-23): what it has, how many, what it has
+//    equipped. The copies of the character get the same items, made by the scripts of their own world, at the moment
+//    of the player's movement the change came in, and equip the same weapons, armor, runes; the item's own scripts
+//    (on_equip) run for the copies too;
 //  - the host sends the time of day of its world, the clients take it over (MP-12);
 //  - characters of players who left are removed, all of them once the session is gone.
 // Called every frame. A newly loaded world has no remote players yet and is filled again.
