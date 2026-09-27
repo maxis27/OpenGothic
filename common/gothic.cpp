@@ -682,6 +682,11 @@ void Gothic::save(std::string_view slot, std::string_view name) {
   }
 
 void Gothic::load(std::string_view slot) {
+  if(isMultiplayer()) {
+    // the save's world is not the session's: everyone would play in another one
+    onPrint("Loading is disabled in multiplayer");
+    return;
+    }
   onLoadGame(slot);
   }
 

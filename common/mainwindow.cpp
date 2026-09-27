@@ -74,7 +74,19 @@ MainWindow::MainWindow(Device& device)
 
   Gothic::inst().onBenchmarkFinished.bind(this,&MainWindow::onBenchmarkFinished);
 
-  if(!Gothic::inst().defaultSave().empty()){
+  if(auto net = Gothic::inst().netSession()) {
+    // multiplayer skips the start menu: the host starts its world, a client the host's one once
+    // it is welcomed (see tick); until then, or if connecting fails, the menu stays
+    if(!Gothic::inst().defaultSave().empty())
+      Log::i("multiplayer: -save is ignored, the session starts a new world");
+    if(net->isHost()) {
+      startGame(net->worldName());
+      rootMenu.popMenu();
+      } else {
+      rootMenu.processMusicTheme();
+      }
+    }
+  else if(!Gothic::inst().defaultSave().empty()){
     Gothic::inst().load(Gothic::inst().defaultSave());
     rootMenu.popMenu();
     }
@@ -911,6 +923,13 @@ uint64_t MainWindow::tick() {
 
   // also while loading or paused, so peers don't time out
   Gothic::inst().tickNetwork();
+  if(auto net = Gothic::inst().netSession()) {
+    if(auto world = net->takeJoinedWorld()) {
+      Log::i("multiplayer: joining the host's world ", *world);
+      startGame(*world);
+      rootMenu.closeAll(); // after startGame: the menu hides only while loading or in game
+      }
+    }
 
   auto st = Gothic::inst().checkLoading();
   if(st==Gothic::LoadState::Finalize || st==Gothic::LoadState::FailedLoad || st==Gothic::LoadState::FailedSave) {

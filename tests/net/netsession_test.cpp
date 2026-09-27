@@ -182,6 +182,11 @@ void testSession(uint16_t port) {
 
   bool ok = runUntil({&host,&diego}, [&]{ return diego.session->state()==NetSession::State::Online; });
   check(ok, "first client is welcomed");
+  check(diego.session->worldName()=="NEWWORLD.ZEN", "client learns the host's world");
+  auto joined = diego.session->takeJoinedWorld();
+  check(joined && *joined=="NEWWORLD.ZEN", "client is told once to load the host's world");
+  check(!diego.session->takeJoinedWorld(), "the host's world is taken only once");
+  check(!host.session->takeJoinedWorld(), "the host joins no world");
 
   // the host spawned characters for itself and Diego before Milten came
   host.session->setAvatar({NetSession::HostPlayer, 10, 1, 2, 3, 90});
