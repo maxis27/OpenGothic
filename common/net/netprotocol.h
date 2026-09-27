@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -19,7 +20,7 @@
 namespace NetProtocol {
 
   // bump on every incompatible change of any message
-  constexpr uint16_t Version = 13;
+  constexpr uint16_t Version = 14;
   // "OGMP", identifies OpenGothic multiplayer traffic
   constexpr uint32_t Magic   = 0x504D474F;
 
@@ -46,6 +47,8 @@ namespace NetProtocol {
     SpawnEntity  = 12,
     DespawnEntity = 13,
     NpcStates    = 14,
+    PlayerItem   = 15,
+    ItemTaken    = 16,
     };
 
   enum class RejectReason : uint8_t {
@@ -194,29 +197,40 @@ namespace NetProtocol {
     int32_t     spell    = -1;  // spell id (C_ITEM::spell) of the spell that hit, -1: none (MP-18)
     };
 
-  // kinds of entities the server spawns in the clients' worlds (items follow with MP-22)
+  // kinds of entities the server spawns in the clients' worlds
   enum class EntityKind : uint8_t {
-    Npc = 1,
+    Npc  = 1,
+    Item = 2, // an item on the ground (MP-22)
     };
 
+  // orientation of an item in the world: the x, y and z axes of its matrix, 3 floats each
+  using ItemAxes = std::array<float,9>;
+  constexpr ItemAxes IdentityAxes = {1,0,0, 0,1,0, 0,0,1};
+
   // server -> client, reliable: an entity of the server's world, other than a player's character
-  // (PlayerSpawn), is in the client's world too under network id entityId (MP-19). Clients create no npcs of
-  // their own: they have only the ones the server spawns. Sent when the server's world gets the entity, and to
+  // (PlayerSpawn), is in the client's world too under network id entityId (MP-19). Clients create no npcs and
+  // no items on the ground of their own: they have only the ones the server spawns (items: MP-22). Sent when the server's world gets the entity, and to
   // a newcomer right after Welcome for every entity already there, with what the entity is like then.
   // An entity id that comes again names a new entity: the client replaces the one it had under that id.
   struct SpawnEntity {
     enum Flag : uint8_t {
       Dead        = 1<<0, // lies dead
       Unconscious = 1<<1, // lies unconscious; at most one of them
-      AllFlags    = (1<<2)-1,
+      Dynamic     = 1<<2, // item: dropped in the game rather than placed with the world, falls and rolls (physics)
+      AllFlags    = (1<<3)-1,
+      NpcFlags    = Dead|Unconscious,
+      ItemFlags   = Dynamic,
       };
     uint32_t    entityId = 0;   // never 0
     EntityKind  kind     = EntityKind::Npc;
-    uint32_t    instance = 0;   // script symbol of the instance (C_NPC) the entity is made from, never 0
+    uint32_t    instance = 0;   // script symbol of the instance (C_NPC, C_ITEM) the entity is made from, never 0
     float       x = 0, y = 0, z = 0;
-    float       rotation = 0;   // degrees, Npc::rotation()
-    int32_t     hp       = 0;   // hit points, >= 0
-    uint8_t     flags    = 0;   // Flag
+    float       rotation = 0;   // npc: degrees, Npc::rotation(); item: 0
+    int32_t     hp       = 0;   // npc: hit points, >= 0; item: 0
+    uint8_t     flags    = 0;   // Flag, only the ones of its kind
+    // items only, not encoded for npcs
+    uint32_t    count    = 0;   // how many of the item lie there (a stack), >= 1
+    ItemAxes    axes     = IdentityAxes;
     };
 
   // server -> client, reliable: the entity is gone from the server's world, e.g. removed by the scripts
@@ -258,8 +272,53 @@ namespace NetProtocol {
     std::vector<NpcState> npcs; // at most MaxNpcStates
     };
 
+  // what a player's character does with an item (MP-22)
+  enum class ItemMove : uint8_t {
+    Take = 1, // picks an item up from the ground
+    Drop = 2, // drops an item from its inventory: puts it down, loses its weapon when felled, throws its torch away
+    Use  = 3, // eats, drinks or reads an item from its inventory (an item with an animation of its own)
+    };
+
+  // how many of one item a player can drop at once
+  constexpr uint32_t MaxItemCount = 1000000;
+
+  // player -> server -> other players, reliable, sent as the character's animation starts: a player's character has
+  // done something with an item. The others play the animation on their copy of the character when their playback
+  // of its states reaches time, like PlayerAttack. Only the server changes what lies on the ground:
+  //  - Take asks the server for the item; the server answers the player with ItemTaken, and the item is despawned
+  //    for everyone (DespawnEntity) when it was granted. Until then the player holds the item aside;
+  //  - Drop has the server put the item down where the player dropped it, and spawn it for everyone (SpawnEntity);
+  //  - Use changes nothing on the ground: the item's effect (its script) runs only for the player's own character,
+  //    the copies play the animation and take the change of hit points over.
+  struct PlayerItem {
+    enum Flag : uint8_t {
+      Animated = 1<<0, // Drop: the character plays the drop animation (not when a weapon falls from its hand)
+      AllFlags = (1<<1)-1,
+      };
+    uint32_t    playerId = 0;
+    uint32_t    entityId = 0;   // the character (PlayerSpawn::entityId)
+    uint32_t    time     = 0;   // sender's session clock in ms, the clock of PlayerState::time
+    ItemMove    move     = ItemMove::Take;
+    uint32_t    item     = 0;   // Take: entity id of the item on the ground (SpawnEntity), never 0; 0 otherwise
+    uint32_t    instance = 0;   // script symbol of the item (C_ITEM), never 0
+    uint32_t    count    = 0;   // Take, Drop: how many, 1..MaxItemCount; Use: 1
+    float       x = 0, y = 0, z = 0; // Take: where the item lies; Drop: where it is dropped
+    ItemAxes    axes     = IdentityAxes; // Drop: orientation of the dropped item
+    int32_t     hp       = 0;   // Use: change of the character's hit points by the item's effect
+    int32_t     hpMax    = 0;   // Use: change of its maximum hit points
+    uint8_t     flags    = 0;   // Flag
+    };
+
+  // server -> player, reliable: the answer to the player's Take of item (PlayerItem::item). Granted: the item was
+  // still there and is now the player's, the player puts it into its inventory. Refused: somebody else was quicker,
+  // or the character is too far away; the player lets go of it.
+  struct ItemTaken {
+    uint32_t    item    = 0;    // entity id, never 0
+    bool        granted = false;
+    };
+
   using Message = std::variant<Hello,Welcome,Reject,Chat,PlayerJoined,PlayerLeft,PlayerSpawn,PlayerState,WorldTime,
-                               PlayerAttack,Hit,SpawnEntity,DespawnEntity,NpcStates>;
+                               PlayerAttack,Hit,SpawnEntity,DespawnEntity,NpcStates,PlayerItem,ItemTaken>;
 
   std::vector<uint8_t> encode(const Message& msg);
   // Returns nothing for truncated, oversized or unknown packets.

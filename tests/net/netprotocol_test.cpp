@@ -190,7 +190,7 @@ void testEncoding() {
   check(!decode(noIdEnt.data(), noIdEnt.size()), "SpawnEntity without entity id is refused");
   auto noInstEnt = encode(Ent{21, EntityKind::Npc, 0});
   check(!decode(noInstEnt.data(), noInstEnt.size()), "SpawnEntity without instance is refused");
-  auto badKindEnt = encode(Ent{21, EntityKind(2), 0x1234});
+  auto badKindEnt = encode(Ent{21, EntityKind(3), 0x1234});
   check(!decode(badKindEnt.data(), badKindEnt.size()), "SpawnEntity of an unknown kind is refused");
   auto nanEnt = encode(Ent{21, EntityKind::Npc, 0x1234, std::nanf(""), 0, 0, 0});
   check(!decode(nanEnt.data(), nanEnt.size()), "SpawnEntity with NaN position is refused");
@@ -198,8 +198,79 @@ void testEncoding() {
   check(!decode(negEnt.data(), negEnt.size()), "SpawnEntity with negative hit points is refused");
   auto bothEnt = encode(Ent{21, EntityKind::Npc, 0x1234, 0, 0, 0, 0, 0, Ent::Dead|Ent::Unconscious});
   check(!decode(bothEnt.data(), bothEnt.size()), "SpawnEntity both dead and unconscious is refused");
-  auto flagEnt = encode(Ent{21, EntityKind::Npc, 0x1234, 0, 0, 0, 0, 0, 1<<2});
+  auto flagEnt = encode(Ent{21, EntityKind::Npc, 0x1234, 0, 0, 0, 0, 0, 1<<3});
   check(!decode(flagEnt.data(), flagEnt.size()), "SpawnEntity with unknown flags is refused");
+  auto dynNpc = encode(Ent{21, EntityKind::Npc, 0x1234, 0, 0, 0, 0, 0, Ent::Dynamic});
+  check(!decode(dynNpc.data(), dynNpc.size()), "SpawnEntity of an npc with an item's flag is refused");
+
+  // items on the ground (MP-22)
+  Ent item{22, EntityKind::Item, 0x777, 10.f, 20.f, -30.f, 0, 0, Ent::Dynamic};
+  item.count = 50;
+  item.axes  = {0,0,1, 0,1,0, -1,0,0};
+  auto itm = roundTrip(item, s);
+  check(itm!=nullptr && itm->kind==EntityKind::Item && itm->instance==0x777 && itm->x==10.f && itm->y==20.f &&
+        itm->z==-30.f && itm->count==50 && itm->axes==item.axes && itm->flags==Ent::Dynamic, "SpawnEntity of an item round trip");
+  check(encode(item).size()==encode(Ent{22, EntityKind::Npc, 0x777}).size()+4+9*4, "only items carry count and axes");
+  auto noCount = item;
+  noCount.count = 0;
+  auto noCountPkg = encode(noCount);
+  check(!decode(noCountPkg.data(), noCountPkg.size()), "SpawnEntity of no items is refused");
+  auto deadItem = item;
+  deadItem.flags = Ent::Dead;
+  auto deadItemPkg = encode(deadItem);
+  check(!decode(deadItemPkg.data(), deadItemPkg.size()), "SpawnEntity of a dead item is refused");
+  auto hpItem = item;
+  hpItem.hp = 5;
+  auto hpItemPkg = encode(hpItem);
+  check(!decode(hpItemPkg.data(), hpItemPkg.size()), "SpawnEntity of an item with hit points is refused");
+  auto nanAxes = item;
+  nanAxes.axes[4] = std::nanf("");
+  auto nanAxesPkg = encode(nanAxes);
+  check(!decode(nanAxesPkg.data(), nanAxesPkg.size()), "SpawnEntity of an item with NaN axes is refused");
+  auto cutItem = encode(item);
+  check(!decode(cutItem.data(), cutItem.size()-1), "truncated SpawnEntity of an item is refused");
+
+  PlayerItem take;
+  take.playerId = 2; take.entityId = 5; take.time = 900; take.move = ItemMove::Take;
+  take.item = 22; take.instance = 0x777; take.count = 50; take.x = 1; take.y = 2; take.z = 3;
+  auto tk = roundTrip(take, s);
+  check(tk!=nullptr && tk->playerId==2 && tk->entityId==5 && tk->time==900 && tk->move==ItemMove::Take &&
+        tk->item==22 && tk->instance==0x777 && tk->count==50 && tk->x==1 && tk->y==2 && tk->z==3, "PlayerItem Take round trip");
+  PlayerItem drop;
+  drop.entityId = 5; drop.move = ItemMove::Drop; drop.instance = 0x778; drop.count = 3;
+  drop.axes = {0,1,0, 1,0,0, 0,0,1}; drop.flags = PlayerItem::Animated;
+  auto dr = roundTrip(drop, s);
+  check(dr!=nullptr && dr->move==ItemMove::Drop && dr->item==0 && dr->count==3 && dr->axes==drop.axes &&
+        dr->flags==PlayerItem::Animated, "PlayerItem Drop round trip");
+  PlayerItem use;
+  use.entityId = 5; use.move = ItemMove::Use; use.instance = 0x779; use.count = 1; use.hp = 50; use.hpMax = -2;
+  auto us = roundTrip(use, s);
+  check(us!=nullptr && us->move==ItemMove::Use && us->hp==50 && us->hpMax==-2, "PlayerItem Use round trip");
+  auto refused = [&](PlayerItem m, const char* what) {
+    auto pkg = encode(m);
+    check(!decode(pkg.data(), pkg.size()), what);
+    };
+  auto bad = take; bad.item = 0;         refused(bad, "PlayerItem Take without item is refused");
+  bad = drop; bad.item = 22;             refused(bad, "PlayerItem Drop of an entity is refused");
+  bad = take; bad.entityId = 0;          refused(bad, "PlayerItem without character is refused");
+  bad = take; bad.instance = 0;          refused(bad, "PlayerItem without instance is refused");
+  bad = drop; bad.count = 0;             refused(bad, "PlayerItem Drop of nothing is refused");
+  bad = drop; bad.count = MaxItemCount+1; refused(bad, "PlayerItem Drop of too many is refused");
+  bad = use;  bad.count = 2;             refused(bad, "PlayerItem Use of two is refused");
+  bad = drop; bad.hp = 5;                refused(bad, "PlayerItem Drop with hit points is refused");
+  bad = take; bad.flags = PlayerItem::Animated; refused(bad, "PlayerItem Take with a Drop flag is refused");
+  bad = drop; bad.flags = 1<<1;          refused(bad, "PlayerItem with unknown flags is refused");
+  bad = drop; bad.axes[0] = std::nanf(""); refused(bad, "PlayerItem with NaN axes is refused");
+  bad = use;  bad.move = ItemMove(4);    refused(bad, "PlayerItem with unknown move is refused");
+  auto cutTake = encode(take);
+  check(!decode(cutTake.data(), cutTake.size()-1), "truncated PlayerItem is refused");
+
+  auto yes = roundTrip(ItemTaken{22, true}, s);
+  check(yes!=nullptr && yes->item==22 && yes->granted, "ItemTaken round trip");
+  auto no = roundTrip(ItemTaken{22, false}, s);
+  check(no!=nullptr && !no->granted, "refused ItemTaken round trip");
+  auto noItem = encode(ItemTaken{0, true});
+  check(!decode(noItem.data(), noItem.size()), "ItemTaken without item is refused");
   auto cutEnt = encode(Ent{21, EntityKind::Npc, 0x1234});
   check(!decode(cutEnt.data(), cutEnt.size()-1), "truncated SpawnEntity is refused");
   auto despawn = roundTrip(DespawnEntity{21}, s);

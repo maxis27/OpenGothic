@@ -352,6 +352,48 @@ void testSession(uint16_t port) {
   check(diegoAtk.size()==1 && diegoAtk[0].playerId==NetSession::HostPlayer && diegoAtk[0].move==NetProtocol::AttackMove::Parade,
         "a player gets no attack of its own back");
 
+  // items: client -> host -> other client, host -> clients; the host answers a take to its player only
+  using NetProtocol::ItemMove;
+  std::vector<NetSession::PlayerItem> hostItm, diegoItm, miltenItm;
+  std::vector<NetSession::ItemTaken>  diegoAns, miltenAns;
+  auto collectItems = [&]{
+    for(auto& e:host.session->takeItems())     hostItm.push_back(e);
+    for(auto& e:diego.session->takeItems())    diegoItm.push_back(e);
+    for(auto& e:milten.session->takeItems())   miltenItm.push_back(e);
+    for(auto& a:diego.session->takeAnswers())  diegoAns.push_back(a);
+    for(auto& a:milten.session->takeAnswers()) miltenAns.push_back(a);
+    };
+  NetSession::PlayerItem take;
+  take.entityId = 15; take.move = ItemMove::Take; take.item = 40; take.instance = 500; take.count = 2;
+  NetSession::PlayerItem foreign = take;
+  foreign.entityId = 11;
+  NetSession::PlayerItem use;
+  use.entityId = 10; use.move = ItemMove::Use; use.instance = 501; use.count = 1; use.hp = 25;
+  check(diego.session->sendItem(take), "client takes an item");
+  check(diego.session->sendItem(foreign), "client sends an item with a foreign character");
+  check(host.session->sendItem(use), "host uses an item");
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    collectItems();
+    return !hostItm.empty() && !diegoItm.empty() && miltenItm.size()>=2;
+    });
+  check(ok, "items reach the host and the other players");
+  host.session->answerTake(diegoId, {40, true});
+  diego.session->answerTake(diegoId, {41, true}); // clients can't
+  ok = runUntil({&host,&diego,&milten}, [&]{ collectItems(); return !diegoAns.empty(); });
+  check(ok, "the host's answer reaches the player");
+  for(int i=0; i<50; ++i) {
+    for(auto p:{&host,&diego,&milten})
+      p->session->poll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+  collectItems();
+  check(hostItm.size()==1 && hostItm[0].playerId==diegoId && hostItm[0].item==40 && hostItm[0].count==2 &&
+        hostItm[0].move==ItemMove::Take, "the host gets the client's take intact");
+  check(miltenItm.size()==2 && diegoItm.size()==1 && diegoItm[0].playerId==NetSession::HostPlayer &&
+        diegoItm[0].hp==25, "a take with another player's character is dropped, a use arrives intact");
+  check(diegoAns.size()==1 && diegoAns[0].item==40 && diegoAns[0].granted && miltenAns.empty(),
+        "only the player asking gets the answer");
+
   // hits: host -> clients only
   host.session->sendHit({10, 15, 80, 20, NetSession::Hit::Effect|NetSession::Hit::Stumble});
   diego.session->sendHit({15, 10, 0, 999, 0}); // clients can't
@@ -406,6 +448,19 @@ void testSession(uint16_t port) {
   host.session->setEntities({{30, Npc, 101}, {32, Npc, 300}, {33, Npc, 100}});
   ok = runUntil({&host,&diego,&milten}, [&]{ return diego.session->entities().at(30).instance==101; });
   check(ok, "an id naming another npc is spawned again");
+
+  // items on the ground are entities too, with a count and an orientation (MP-22)
+  const auto Item = NetProtocol::EntityKind::Item;
+  Ent gold{34, Item, 500, 10, 20, 30, 0, 0, Ent::Dynamic};
+  gold.count = 25;
+  gold.axes  = {0,0,1, 0,1,0, -1,0,0};
+  host.session->setEntities({{30, Npc, 101}, {32, Npc, 300}, {33, Npc, 100}, gold});
+  ok = runUntil({&host,&diego,&milten}, [&]{ return diego.session->entities().count(34)>0; });
+  check(ok && diego.session->entities().at(34).kind==Item && diego.session->entities().at(34).count==25 &&
+        diego.session->entities().at(34).axes==gold.axes, "an item arrives intact");
+  host.session->setEntities({{30, Npc, 101}, {32, Npc, 300}, {33, Npc, 100}});
+  ok = runUntil({&host,&diego,&milten}, [&]{ return diego.session->entities().count(34)==0; });
+  check(ok, "an item taken from the ground is despawned");
 
   testNpcStates(host, diego, milten);
 

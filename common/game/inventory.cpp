@@ -894,10 +894,13 @@ bool Inventory::use(size_t cls, Npc &owner, uint8_t slotHint, bool force) {
 
   // owner.stopDlgAnim();
   setCurrentItem(it->clsId());
+  const int32_t hp    = owner.attribute(ATR_HITPOINTS);
+  const int32_t hpMax = owner.attribute(ATR_HITPOINTSMAX);
   if(itData.on_state[0]!=0){
     auto& vm = owner.world().script();
     vm.invokeItem(&owner,uint32_t(itData.on_state[0]));
     }
+  owner.onItemUsed(cls, owner.attribute(ATR_HITPOINTS)-hp, owner.attribute(ATR_HITPOINTSMAX)-hpMax);
 
   if(deleteLater)
     owner.delItem(cls,1);

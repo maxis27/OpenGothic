@@ -722,19 +722,117 @@ auto World::takeNetHits() -> std::vector<NetProtocol::Hit> {
   }
 
 Item *World::addItem(size_t itemInstance, std::string_view at) {
+  if(Gothic::inst().isNetClient())
+    return nullptr; // Wld_InsertItem of the world's startup and all later ones: the host has these items (MP-22)
   return wobj.addItem(itemInstance,at);
   }
 
 Item* World::addItem(const zenkit::VItem& vob) {
+  if(Gothic::inst().isNetClient())
+    return nullptr; // the items of the world's file: the host has them
   return wobj.addItem(vob);
   }
 
 Item* World::addItem(size_t itemInstance, const Tempest::Vec3& pos) {
+  if(Gothic::inst().isNetClient())
+    return nullptr;
   return wobj.addItem(itemInstance, pos);
   }
 
 Item* World::addItemDyn(size_t itemInstance, const Tempest::Matrix4x4& pos, size_t owner) {
+  if(Gothic::inst().isNetClient())
+    return nullptr;
   return wobj.addItemDyn(itemInstance, pos, owner);
+  }
+
+Item* World::dropItem(Npc& from, size_t itemInstance, size_t count, const Tempest::Matrix4x4& pos, bool animated) {
+  if(itemInstance==size_t(-1) || count==0)
+    return nullptr;
+  if(Gothic::inst().isMultiplayer()) {
+    if(isRemotePlayer(from))
+      return nullptr; // the player drops it in its own world, and the host puts it down when told so
+    if(&from==npcPlayer) {
+      NetProtocol::PlayerItem e;
+      e.move     = NetProtocol::ItemMove::Drop;
+      e.instance = uint32_t(itemInstance);
+      e.count    = uint32_t(std::min<size_t>(count, NetProtocol::MaxItemCount));
+      e.x        = pos.at(3,0);
+      e.y        = pos.at(3,1);
+      e.z        = pos.at(3,2);
+      for(int c=0; c<3; ++c)
+        for(int r=0; r<3; ++r)
+          e.axes[size_t(c*3+r)] = pos.at(c,r);
+      e.flags    = animated ? NetProtocol::PlayerItem::Animated : 0;
+      addNetItemEvent(e);
+      }
+    if(Gothic::inst().isNetClient())
+      return nullptr; // the host puts it down and spawns it (an npc's here: the host's copy drops it too)
+    }
+  Item* it = wobj.addItemDyn(itemInstance, pos, from.handle().symbol_index());
+  if(it!=nullptr)
+    it->setCount(count);
+  return it;
+  }
+
+Item* World::addNetItem(size_t itemInstance, const Tempest::Matrix4x4& pos, size_t count, bool dynamic, size_t owner) {
+  auto* sym = script().findSymbol(itemInstance);
+  if(sym==nullptr || sym->type()!=zenkit::DaedalusDataType::INSTANCE || count==0)
+    return nullptr;
+  Item* it = dynamic ? wobj.addItemDyn(itemInstance, pos, owner) : wobj.addItem(itemInstance, Tempest::Vec3());
+  if(it==nullptr)
+    return nullptr;
+  if(!dynamic)
+    it->setObjMatrix(pos);
+  it->setCount(count);
+  return it;
+  }
+
+Item* World::netTakeItem(Item& item) {
+  const NetEntityId id = netEntities().id(item);
+  if(!id || netTakes.count(id.value)>0)
+    return nullptr; // not an item of the host's world
+  NetProtocol::PlayerItem e;
+  e.move     = NetProtocol::ItemMove::Take;
+  e.item     = id.value;
+  e.instance = uint32_t(item.clsId());
+  e.count    = uint32_t(std::clamp<size_t>(item.count(), 1, NetProtocol::MaxItemCount));
+  e.x        = item.position().x;
+  e.y        = item.position().y;
+  e.z        = item.position().z;
+  auto ptr = wobj.takeItem(item);
+  if(ptr==nullptr)
+    return nullptr;
+  ptr->clearView(); // out of sight while held aside
+  addNetItemEvent(e);
+  Item* ret = ptr.get();
+  netTakes[id.value] = std::move(ptr);
+  return ret;
+  }
+
+auto World::takeNetTake(uint32_t itemId) -> std::unique_ptr<Item> {
+  auto it = netTakes.find(itemId);
+  if(it==netTakes.end())
+    return nullptr;
+  auto ret = std::move(it->second);
+  netTakes.erase(it);
+  return ret;
+  }
+
+void World::clearNetTakes() {
+  netTakes.clear();
+  }
+
+void World::addNetItemEvent(const NetProtocol::PlayerItem& e) {
+  if(Gothic::inst().isMultiplayer() && netItemEvents.size()<MaxNetHits)
+    netItemEvents.push_back(e);
+  }
+
+auto World::takeNetItemEvents() -> std::vector<NetProtocol::PlayerItem> {
+  return std::exchange(netItemEvents, {});
+  }
+
+size_t World::itemCount() const {
+  return wobj.itmCount();
   }
 
 std::unique_ptr<Item> World::takeItem(Item &it) {

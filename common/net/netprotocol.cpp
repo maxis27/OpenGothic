@@ -175,6 +175,11 @@ void write(Writer& w, const SpawnEntity& m) {
   w.f32(m.rotation);
   w.u32(uint32_t(m.hp));
   w.u8 (m.flags);
+  if(m.kind==EntityKind::Item) {
+    w.u32(m.count);
+    for(float f:m.axes)
+      w.f32(f);
+    }
   }
 
 void write(Writer& w, const DespawnEntity& m) {
@@ -204,6 +209,31 @@ void write(Writer& w, const NpcStates& m) {
     for(size_t a=0; a<anims; ++a)
       w.str(n.anims[a], MaxAnimNameLength);
     }
+  }
+
+void write(Writer& w, const PlayerItem& m) {
+  w.u8 (uint8_t(MsgType::PlayerItem));
+  w.u32(m.playerId);
+  w.u32(m.entityId);
+  w.u32(m.time);
+  w.u8 (uint8_t(m.move));
+  w.u32(m.item);
+  w.u32(m.instance);
+  w.u32(m.count);
+  w.f32(m.x);
+  w.f32(m.y);
+  w.f32(m.z);
+  for(float f:m.axes)
+    w.f32(f);
+  w.u32(uint32_t(m.hp));
+  w.u32(uint32_t(m.hpMax));
+  w.u8 (m.flags);
+  }
+
+void write(Writer& w, const ItemTaken& m) {
+  w.u8 (uint8_t(MsgType::ItemTaken));
+  w.u32(m.item);
+  w.u8 (m.granted ? 1 : 0);
   }
 
 std::optional<Message> readHello(Reader& r) {
@@ -318,16 +348,27 @@ std::optional<Message> readSpawnEntity(Reader& r) {
   SpawnEntity m;
   uint8_t     kind = 0;
   uint32_t    hp   = 0;
-  if(!r.u32(m.entityId) || m.entityId==0 || !r.u8(kind) || kind!=uint8_t(EntityKind::Npc) ||
+  if(!r.u32(m.entityId) || m.entityId==0 || !r.u8(kind) ||
+     (kind!=uint8_t(EntityKind::Npc) && kind!=uint8_t(EntityKind::Item)) ||
      !r.u32(m.instance) || m.instance==0 ||
      !r.f32(m.x) || !r.f32(m.y) || !r.f32(m.z) || !r.f32(m.rotation) || !r.u32(hp) ||
-     !r.u8(m.flags) || (m.flags & ~SpawnEntity::AllFlags)!=0 || !r.atEnd())
-    return std::nullopt;
-  if((m.flags & SpawnEntity::Dead) && (m.flags & SpawnEntity::Unconscious))
+     !r.u8(m.flags))
     return std::nullopt;
   m.kind = EntityKind(kind);
   m.hp   = int32_t(hp);
-  if(m.hp<0)
+  if(m.kind==EntityKind::Npc) {
+    if((m.flags & ~SpawnEntity::NpcFlags)!=0 || m.hp<0 ||
+       ((m.flags & SpawnEntity::Dead) && (m.flags & SpawnEntity::Unconscious)))
+      return std::nullopt;
+    } else {
+    if((m.flags & ~SpawnEntity::ItemFlags)!=0 || m.hp!=0 || m.rotation!=0.f ||
+       !r.u32(m.count) || m.count==0)
+      return std::nullopt;
+    for(auto& f:m.axes)
+      if(!r.f32(f))
+        return std::nullopt;
+    }
+  if(!r.atEnd())
     return std::nullopt;
   return m;
   }
@@ -336,6 +377,43 @@ std::optional<Message> readDespawnEntity(Reader& r) {
   DespawnEntity m;
   if(!r.u32(m.entityId) || m.entityId==0 || !r.atEnd())
     return std::nullopt;
+  return m;
+  }
+
+std::optional<Message> readPlayerItem(Reader& r) {
+  PlayerItem m;
+  uint8_t    move = 0;
+  uint32_t   hp = 0, hpMax = 0;
+  if(!r.u32(m.playerId) || !r.u32(m.entityId) || m.entityId==0 || !r.u32(m.time) ||
+     !r.u8(move) || move<uint8_t(ItemMove::Take) || move>uint8_t(ItemMove::Use) ||
+     !r.u32(m.item) || !r.u32(m.instance) || m.instance==0 || !r.u32(m.count) ||
+     !r.f32(m.x) || !r.f32(m.y) || !r.f32(m.z))
+    return std::nullopt;
+  for(auto& f:m.axes)
+    if(!r.f32(f))
+      return std::nullopt;
+  if(!r.u32(hp) || !r.u32(hpMax) || !r.u8(m.flags) || (m.flags & ~PlayerItem::AllFlags)!=0 || !r.atEnd())
+    return std::nullopt;
+  m.move  = ItemMove(move);
+  m.hp    = int32_t(hp);
+  m.hpMax = int32_t(hpMax);
+  if((m.move==ItemMove::Take)!=(m.item!=0))
+    return std::nullopt;
+  if(m.move==ItemMove::Use ? m.count!=1 : (m.count==0 || m.count>MaxItemCount))
+    return std::nullopt;
+  if(m.move!=ItemMove::Use && (m.hp!=0 || m.hpMax!=0))
+    return std::nullopt;
+  if(m.move!=ItemMove::Drop && m.flags!=0)
+    return std::nullopt;
+  return m;
+  }
+
+std::optional<Message> readItemTaken(Reader& r) {
+  ItemTaken m;
+  uint8_t   granted = 0;
+  if(!r.u32(m.item) || m.item==0 || !r.u8(granted) || granted>1 || !r.atEnd())
+    return std::nullopt;
+  m.granted = granted!=0;
   return m;
   }
 
@@ -403,6 +481,8 @@ std::optional<Message> NetProtocol::decode(const uint8_t* data, size_t size) {
     case MsgType::SpawnEntity:  return readSpawnEntity(r);
     case MsgType::DespawnEntity: return readDespawnEntity(r);
     case MsgType::NpcStates:    return readNpcStates(r);
+    case MsgType::PlayerItem:   return readPlayerItem(r);
+    case MsgType::ItemTaken:    return readItemTaken(r);
     }
   return std::nullopt;
   }
