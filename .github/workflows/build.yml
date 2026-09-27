@@ -7,10 +7,10 @@ env:
 
 on:
   push:
-    branches: [master, multiplayer]
+    branches: [master, multiplayer, coop]
     tags: ['*']
   pull_request:
-    branches: [master, multiplayer]
+    branches: [master, multiplayer, coop]
   workflow_dispatch:
 
 permissions:
