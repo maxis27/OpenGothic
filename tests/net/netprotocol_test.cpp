@@ -76,11 +76,11 @@ void testEncoding() {
   auto noIdSpawn = encode(PlayerSpawn{4, 0, 0, 0, 0, 0});
   check(!decode(noIdSpawn.data(), noIdSpawn.size()), "PlayerSpawn without entity id is refused");
 
-  auto state = roundTrip(PlayerState{4, 17, 0xFFFFFFF0u, 123456, -1.f, 2.5f, 3e5f, 90.f, 0x18003, 2, 1, 3, 0xABCD, 0xFFFFFFFFu, 0x1234}, s);
+  auto state = roundTrip(PlayerState{4, 17, 0xFFFFFFF0u, 123456, -1.f, 2.5f, 3e5f, 90.f, 0x18003, 2, 1, 3, 0x1234}, s);
   check(state!=nullptr && state->playerId==4 && state->entityId==17 && state->seq==0xFFFFFFF0u &&
         state->time==123456 && state->x==-1.f && state->y==2.5f && state->z==3e5f && state->rotation==90.f &&
         state->bodyState==0x18003 && state->anim==2 && state->walkMode==1 && state->weaponState==3 &&
-        state->meleeWeapon==0xABCD && state->rangedWeapon==0xFFFFFFFFu && state->spell==0x1234,
+        state->spell==0x1234,
         "PlayerState round trip");
   auto infState = encode(PlayerState{4, 17, 1, 0, 0, 0, 0, std::numeric_limits<float>::infinity()});
   check(!decode(infState.data(), infState.size()), "PlayerState with infinite rotation is refused");
@@ -264,6 +264,38 @@ void testEncoding() {
   bad = use;  bad.move = ItemMove(4);    refused(bad, "PlayerItem with unknown move is refused");
   auto cutTake = encode(take);
   check(!decode(cutTake.data(), cutTake.size()-1), "truncated PlayerItem is refused");
+
+  PlayerInventory inv;
+  inv.playerId = 2; inv.entityId = 5; inv.time = 777;
+  inv.items = {{0x100, 1500, false, 0}, {0x200, 1, true, 0}, {0x300, 2, true, FirstSpellSlot+7}};
+  auto iv = roundTrip(inv, s);
+  check(iv!=nullptr && *iv==inv, "PlayerInventory round trip");
+  auto empty = roundTrip(PlayerInventory{2, 5, 1, {}}, s);
+  check(empty!=nullptr && empty->items.empty(), "empty PlayerInventory round trip");
+  PlayerInventory full = inv;
+  full.items.clear();
+  for(uint32_t i=1; i<=MaxInventoryItems+10; ++i)
+    full.items.push_back({i, 1, false, 0});
+  auto fl = roundTrip(full, s);
+  check(fl!=nullptr && fl->items.size()==MaxInventoryItems, "PlayerInventory is limited to MaxInventoryItems");
+  auto refusedInv = [&](PlayerInventory m, const char* what) {
+    auto pkg = encode(m);
+    check(!decode(pkg.data(), pkg.size()), what);
+    };
+  auto badInv = inv; badInv.entityId = 0;                 refusedInv(badInv, "PlayerInventory without character is refused");
+  badInv = inv; badInv.items[0].instance = 0;             refusedInv(badInv, "PlayerInventory item without instance is refused");
+  badInv = inv; badInv.items[1].count = 0;                refusedInv(badInv, "PlayerInventory item of none is refused");
+  badInv = inv; badInv.items[0].count = MaxInventoryCount+1; refusedInv(badInv, "PlayerInventory item of too many is refused");
+  badInv = inv; badInv.items[2].instance = 0x100;         refusedInv(badInv, "PlayerInventory unsorted items are refused");
+  badInv = inv; badInv.items[1].instance = 0x100;         refusedInv(badInv, "PlayerInventory instance twice is refused");
+  badInv = inv; badInv.items[0].slot = FirstSpellSlot;    refusedInv(badInv, "PlayerInventory slot of an item not equipped is refused");
+  badInv = inv; badInv.items[2].slot = FirstSpellSlot+SpellSlots; refusedInv(badInv, "PlayerInventory slot past the magic slots is refused");
+  badInv = inv; badInv.items[2].slot = 2;                 refusedInv(badInv, "PlayerInventory slot below the magic slots is refused");
+  auto boolInv = encode(inv);
+  boolInv[boolInv.size()-2] = 2; // the last item's equipped flag
+  check(!decode(boolInv.data(), boolInv.size()), "PlayerInventory with an invalid equipped flag is refused");
+  auto cutInv = encode(inv);
+  check(!decode(cutInv.data(), cutInv.size()-1), "truncated PlayerInventory is refused");
 
   auto yes = roundTrip(ItemTaken{22, true}, s);
   check(yes!=nullptr && yes->item==22 && yes->granted, "ItemTaken round trip");

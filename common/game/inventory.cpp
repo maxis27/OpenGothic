@@ -300,6 +300,11 @@ void Inventory::delItem(Item *it, size_t count, Npc& owner) {
       } else {
       ++i;
       }
+  // the arrow on the bow, the item in hand: not left pointing at the item erased below
+  if(ammotSlot.item==it)
+    ammotSlot.item = nullptr;
+  if(stateSlot.item==it)
+    stateSlot.item = nullptr;
   sorted=false;
 
   for(size_t i=0;i<items.size();++i)

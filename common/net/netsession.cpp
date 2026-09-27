@@ -199,6 +199,61 @@ void NetSession::onItem(PlayerId from, PlayerItem e, NetTransport::PeerId peer) 
     sendOthers(peer, e);
   }
 
+bool NetSession::sendInventory(const PlayerInventory& inv) {
+  const uint64_t now = nowMs();
+  if(st!=State::Online || inv.entityId==0)
+    return false;
+  if(inventorySent && inventorySent->entityId==inv.entityId && inventorySent->items==inv.items)
+    return false;
+  if(inventorySent && now-inventorySentAt<InventoryIntervalMs)
+    return false;
+  PlayerInventory msg = inv;
+  msg.playerId    = self;
+  msg.time        = uint32_t(now-startTime);
+  inventorySent   = msg;
+  inventorySentAt = now;
+  if(server) {
+    latestInventory[self] = msg;
+    sendOthers(NetTransport::InvalidPeer, msg);
+    } else {
+    send(hostPeer, msg);
+    }
+  return true;
+  }
+
+auto NetSession::takeInventory(PlayerId id, int64_t upTo) -> std::optional<PlayerInventory> {
+  auto it = inventories.find(id);
+  if(it==inventories.end())
+    return std::nullopt;
+  std::optional<PlayerInventory> ret;
+  auto& q = it->second;
+  while(!q.empty() && int64_t(q.front().time)<=upTo) {
+    ret = std::move(q.front());
+    q.pop_front();
+    }
+  return ret;
+  }
+
+void NetSession::onInventory(PlayerId from, PlayerInventory inv, NetTransport::PeerId peer) {
+  if(from==self || players.count(from)==0)
+    return;
+  if(server) {
+    // a player sends only its own character's
+    auto it = avatars.find(from);
+    if(it==avatars.end() || it->second.entityId!=inv.entityId)
+      return;
+    }
+  inv.playerId = from;
+  if(server)
+    latestInventory[from] = inv;
+  auto& q = inventories[from];
+  if(q.size()>=MaxPendingInventories)
+    q.pop_front();
+  q.push_back(inv);
+  if(server)
+    sendOthers(peer, inv);
+  }
+
 void NetSession::answerTake(PlayerId pid, const ItemTaken& answer) {
   if(!server || answer.item==0)
     return;
@@ -363,6 +418,9 @@ void NetSession::clearWorld() {
   itemEvents.clear();
   answers.clear();
   respawns.clear();
+  inventories.clear();
+  latestInventory.clear();
+  inventorySent.reset();
   if(!entityMap.empty())
     ++entityVersion;
   entityMap.clear();
@@ -375,6 +433,8 @@ void NetSession::forgetPlayer(PlayerId id) {
   npcSent.erase(id);
   avatars.erase(id);
   states .erase(id);
+  inventories.erase(id);
+  latestInventory.erase(id);
   std::erase_if(attacks,    [id](const PlayerAttack& a){ return a.playerId==id; });
   std::erase_if(itemEvents, [id](const PlayerItem&   e){ return e.playerId==id; });
   }
@@ -456,6 +516,10 @@ void NetSession::hostEvent(const NetTransport::Event& e) {
     onItem(from, *item, e.peer);
     return;
     }
+  if(auto inv = std::get_if<PlayerInventory>(&*msg)) {
+    onInventory(from, *inv, e.peer);
+    return;
+    }
   if(auto chat = std::get_if<Chat>(&*msg)) {
     const std::string line = sanitize(chat->text);
     sendOthers(e.peer, Chat{from, line});
@@ -482,6 +546,8 @@ void NetSession::onHello(NetTransport::PeerId peer, const Hello& hello) {
     a.second.flags &= uint8_t(~Avatar::Respawn); // a newcomer spawns the characters, alive anyway
     send(peer, a.second);
     }
+  for(auto& [pid,inv]:latestInventory)
+    send(peer, inv);
   if(worldTime)
     send(peer, WorldTime{*worldTime});
   for(auto& [eid,e]:entityMap)
@@ -573,6 +639,11 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
   if(auto m = std::get_if<PlayerItem>(&*msg)) {
     if(st==State::Online)
       onItem(m->playerId, *m, hostPeer);
+    return;
+    }
+  if(auto m = std::get_if<PlayerInventory>(&*msg)) {
+    if(st==State::Online)
+      onInventory(m->playerId, *m, hostPeer);
     return;
     }
   if(auto m = std::get_if<ItemTaken>(&*msg)) {

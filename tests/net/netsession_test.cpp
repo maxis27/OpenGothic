@@ -23,6 +23,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -285,7 +286,6 @@ void testSession(uint16_t port) {
   ds.entityId = 15;
   ds.x = 100; ds.y = 200; ds.z = 300; ds.rotation = 45;
   ds.bodyState = 3; ds.anim = 2; ds.walkMode = 1; ds.weaponState = 4;
-  ds.meleeWeapon = 1200; ds.rangedWeapon = 1300;
   check(diego.session->sendPlayerState(ds), "client sends its state");
   check(!diego.session->sendPlayerState(ds), "the next state waits for StateIntervalMs");
   ds.entityId = 0;
@@ -297,8 +297,7 @@ void testSession(uint16_t port) {
   if(ok) {
     auto m = milten.session->playerState(diegoId);
     check(m->playerId==diegoId && m->entityId==15 && m->x==100 && m->y==200 && m->z==300 && m->rotation==45 &&
-          m->bodyState==3 && m->anim==2 && m->walkMode==1 && m->weaponState==4 &&
-          m->meleeWeapon==1200 && m->rangedWeapon==1300 && m->seq==1,
+          m->bodyState==3 && m->anim==2 && m->walkMode==1 && m->weaponState==4 && m->seq==1,
           "state arrives intact with the sender's id");
     }
   check(diego.session->playerState(diegoId)==nullptr, "a player gets no state of its own back");
@@ -394,6 +393,77 @@ void testSession(uint16_t port) {
   check(diegoAns.size()==1 && diegoAns[0].item==40 && diegoAns[0].granted && miltenAns.empty(),
         "only the player asking gets the answer");
 
+  // inventories: client -> host -> other client, host -> clients; sent again only when they change (MP-23)
+  constexpr int64_t Always = std::numeric_limits<int64_t>::max();
+  NetSession::PlayerInventory dinv;
+  dinv.playerId = 77; // ignored, the sender's id goes out
+  dinv.entityId = 15;
+  dinv.items    = {{500, 3, false, 0}, {600, 1, true, 0}, {700, 1, true, NetProtocol::FirstSpellSlot+1}};
+  check(diego.session->sendInventory(dinv), "client sends its inventory");
+  check(!diego.session->sendInventory(dinv), "an unchanged inventory is not sent again");
+  NetSession::PlayerInventory hinv;
+  hinv.entityId = 10;
+  hinv.items    = {{800, 1, true, 0}};
+  check(host.session->sendInventory(hinv), "host sends its inventory");
+  std::optional<NetSession::PlayerInventory> hostInv, miltenInv, diegoHostInv, miltenHostInv;
+  auto collectInventories = [&]{
+    if(auto i = host.session->takeInventory(diegoId, Always))                  hostInv       = i;
+    if(auto i = milten.session->takeInventory(diegoId, Always))                miltenInv     = i;
+    if(auto i = diego.session->takeInventory(NetSession::HostPlayer, Always))  diegoHostInv  = i;
+    if(auto i = milten.session->takeInventory(NetSession::HostPlayer, Always)) miltenHostInv = i;
+    };
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    collectInventories();
+    return hostInv && miltenInv && diegoHostInv && miltenHostInv;
+    });
+  check(ok, "inventories reach the host and the other players");
+  if(ok) {
+    check(hostInv->playerId==diegoId && hostInv->entityId==15 && hostInv->items==dinv.items &&
+          *miltenInv==*hostInv, "an inventory arrives intact with the sender's id");
+    check(diegoHostInv->playerId==NetSession::HostPlayer && diegoHostInv->items==hinv.items,
+          "the host's inventory arrives intact");
+    }
+  check(!diego.session->takeInventory(diegoId, Always), "a player gets no inventory of its own back");
+  // a change waits for InventoryIntervalMs; one with another player's character is dropped by the host
+  auto foreignInv = dinv;
+  foreignInv.entityId = 11;
+  for(int i=0; i<60; ++i) {
+    for(auto p:{&host,&diego,&milten})
+      p->session->poll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+  check(diego.session->sendInventory(foreignInv), "client sends an inventory with a foreign character");
+  dinv.items[0].count = 2; // an arrow shot
+  for(int i=0; i<60; ++i) {
+    for(auto p:{&host,&diego,&milten})
+      p->session->poll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+  check(diego.session->sendInventory(dinv), "a changed inventory is sent");
+  hostInv.reset();
+  miltenInv.reset();
+  ok = runUntil({&host,&diego,&milten}, [&]{ collectInventories(); return hostInv && miltenInv; });
+  check(ok && hostInv->entityId==15 && hostInv->items[0].count==2 && miltenInv->entityId==15,
+        "an inventory with another player's character is dropped, the change arrives");
+  // what is taken is the newest one up to the playback time; the ones before it go with it
+  dinv.items[0].count = 1;
+  for(int i=0; i<60; ++i) {
+    for(auto p:{&host,&diego,&milten})
+      p->session->poll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+  check(diego.session->sendInventory(dinv), "another change is sent");
+  for(int i=0; i<60; ++i) { // let it arrive
+    for(auto p:{&host,&diego,&milten})
+      p->session->poll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+  const int64_t before = int64_t(hostInv->time); // the time of the one taken last, earlier than the new one's
+  check(!host.session->takeInventory(diegoId, before), "an inventory waits for the playback to reach its time");
+  auto newest = host.session->takeInventory(diegoId, Always);
+  check(newest && newest->items[0].count==1 && !host.session->takeInventory(diegoId, Always),
+        "the waiting inventory is taken once the playback reaches it");
+
   // hits: host -> clients only
   host.session->sendHit({10, 15, 80, 20, NetSession::Hit::Effect|NetSession::Hit::Stumble});
   diego.session->sendHit({15, 10, 0, 999, 0}); // clients can't
@@ -474,6 +544,12 @@ void testSession(uint16_t port) {
         gorn.session->takeRespawns().empty(), "a newcomer gets a respawned character as a plain one");
   check(ok && gorn.session->entities().at(30).instance==101 && gorn.session->entities().at(32).instance==300,
         "a newcomer gets the npcs as they are now");
+  {
+  auto gd = gorn.session->takeInventory(diegoId, std::numeric_limits<int64_t>::max());
+  auto gh = gorn.session->takeInventory(NetSession::HostPlayer, std::numeric_limits<int64_t>::max());
+  check(gd && gd->playerId==diegoId && gd->items[0].count==1 && gh && gh->items.size()==1 && gh->items[0].instance==800,
+        "a newcomer gets the latest inventory of every player");
+  }
   gorn.session.reset();
   ok = runUntil({&host,&diego,&milten}, [&]{ return diego.saw("Gorn left the game"); });
   check(ok, "the newcomer leaves again");

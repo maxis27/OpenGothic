@@ -20,7 +20,7 @@
 namespace NetProtocol {
 
   // bump on every incompatible change of any message
-  constexpr uint16_t Version = 14;
+  constexpr uint16_t Version = 15;
   // "OGMP", identifies OpenGothic multiplayer traffic
   constexpr uint32_t Magic   = 0x504D474F;
 
@@ -49,6 +49,7 @@ namespace NetProtocol {
     NpcStates    = 14,
     PlayerItem   = 15,
     ItemTaken    = 16,
+    PlayerInventory = 17,
     };
 
   enum class RejectReason : uint8_t {
@@ -130,9 +131,8 @@ namespace NetProtocol {
     uint16_t    anim        = 0;   // AnimationSolver::Anim last started by the character
     uint8_t     walkMode    = 0;   // WalkBit
     uint8_t     weaponState = 0;   // WeaponState
-    uint32_t    meleeWeapon  = 0;  // script symbol of the equipped melee weapon (Item::clsId()), 0: none
-    uint32_t    rangedWeapon = 0;  // script symbol of the equipped bow or crossbow, 0: none
-    uint32_t    spell        = 0;  // script symbol of the rune or scroll in hand (weaponState Mage), 0: none (MP-18)
+    uint32_t    spell       = 0;   // script symbol of the rune or scroll in hand (weaponState Mage), 0: none (MP-18);
+                                   // the weapons the character has on come with PlayerInventory (MP-23)
     };
 
   // server -> client, about once a second and after every jump of the clock: the time of day in
@@ -317,8 +317,41 @@ namespace NetProtocol {
     bool        granted = false;
     };
 
+  // items in one PlayerInventory, and the highest count of one of them
+  constexpr size_t   MaxInventoryItems = 1024;
+  constexpr uint32_t MaxInventoryCount = 100000000;
+  // magic slots of equipped runes and scrolls (Item::slot()): the first one and how many there are
+  constexpr uint8_t  FirstSpellSlot = 3;
+  constexpr uint8_t  SpellSlots     = 8;
+
+  // one item of a PlayerInventory: all of the character's items of one instance
+  struct InventoryItem {
+    uint32_t    instance = 0;     // script symbol of the item (C_ITEM), never 0
+    uint32_t    count    = 0;     // how many, 1..MaxInventoryCount
+    bool        equipped = false; // worn or in a weapon slot: armor, belt, amulet, ring, weapon, shield, rune, scroll
+    uint8_t     slot     = 0;     // equipped rune or scroll: its magic slot, FirstSpellSlot..FirstSpellSlot+SpellSlots-1;
+                                  // 0 otherwise (the other items have one slot of their kind)
+
+    bool operator == (const InventoryItem& o) const = default;
+    };
+
+  // player -> server -> other players, reliable, whenever the player's character has other items than when last sent
+  // (and again for a new entityId): the whole inventory of the character (MP-23). Each player owns its own character's
+  // inventory; the others give their copy of the character these items (made by their own scripts from the instance),
+  // equip what is equipped and drop the rest, when their playback of its states reaches time, so that items come and go
+  // with the animations of PlayerItem and PlayerAttack. A newcomer gets the latest of every player right after Welcome.
+  struct PlayerInventory {
+    uint32_t    playerId = 0;
+    uint32_t    entityId = 0;   // the character (PlayerSpawn::entityId)
+    uint32_t    time     = 0;   // sender's session clock in ms, the clock of PlayerState::time
+    std::vector<InventoryItem> items; // at most MaxInventoryItems, every instance at most once, sorted by instance
+
+    bool operator == (const PlayerInventory& o) const = default;
+    };
+
   using Message = std::variant<Hello,Welcome,Reject,Chat,PlayerJoined,PlayerLeft,PlayerSpawn,PlayerState,WorldTime,
-                               PlayerAttack,Hit,SpawnEntity,DespawnEntity,NpcStates,PlayerItem,ItemTaken>;
+                               PlayerAttack,Hit,SpawnEntity,DespawnEntity,NpcStates,PlayerItem,ItemTaken,
+                               PlayerInventory>;
 
   std::vector<uint8_t> encode(const Message& msg);
   // Returns nothing for truncated, oversized or unknown packets.

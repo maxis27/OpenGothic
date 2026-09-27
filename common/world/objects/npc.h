@@ -299,11 +299,12 @@ class Npc final {
     bool      aimBow();
     bool      shootBow(Interactive* focOverride = nullptr);
     // multiplayer: the character of another player fires the arrow its player did (MP-17), at target,
-    // or along dir (the arrow's velocity) without one; the arrow is given for the shot, the character
-    // has none (items belong to MP-22)
+    // or along dir (the arrow's velocity) without one; the arrow is given for the shot when the character
+    // has none, e.g. the last one, which its player's inventory (MP-23) no longer has
     bool      netShoot(const Npc* target, const Tempest::Vec3& dir);
     // multiplayer: the character of another player charges a spell, plays its cast animation or emits it,
-    // as its player did (MP-18), with the rune or scroll spellItem, which it is given if it has none.
+    // as its player did (MP-18), with the rune or scroll spellItem, which it is given if it has none (a scroll
+    // used up already in its player's inventory, MP-23).
     // The cast emits the spell at level: its projectile at target, or along dir without one, its other
     // effect on target or on the caster. The spell's scripts aren't run: mana, summons, transformations
     // stay the player's own
