@@ -131,6 +131,10 @@ void write(Writer& w, const PlayerState& m) {
   w.u8 (m.walkMode);
   w.u8 (m.weaponState);
   w.u32(m.spell);
+  const size_t anims = m.anims.size()<MaxNpcAnims ? m.anims.size() : MaxNpcAnims;
+  w.u8 (uint8_t(anims));
+  for(size_t a=0; a<anims; ++a)
+    w.str(m.anims[a], MaxAnimNameLength);
   }
 
 void write(Writer& w, const WorldTime& m) {
@@ -250,6 +254,46 @@ void write(Writer& w, const PlayerInventory& m) {
     }
   }
 
+void writeMobItems(Writer& w, const std::vector<MobItem>& items) {
+  const size_t count = items.size()<MaxInventoryItems ? items.size() : MaxInventoryItems;
+  w.u16(uint16_t(count));
+  for(size_t i=0; i<count; ++i) {
+    w.u32(items[i].instance);
+    w.u32(items[i].count);
+    }
+  }
+
+void write(Writer& w, const MobState& m) {
+  w.u8 (uint8_t(MsgType::MobState));
+  w.u32(m.mob);
+  w.u32(uint32_t(m.state));
+  w.u8 (m.flags);
+  w.u8 (uint8_t(m.trigger));
+  w.u32(m.by);
+  writeMobItems(w, m.items);
+  }
+
+void write(Writer& w, const PlayerMob& m) {
+  w.u8 (uint8_t(MsgType::PlayerMob));
+  w.u32(m.playerId);
+  w.u32(m.entityId);
+  w.u32(m.mob);
+  w.u8 (uint8_t(m.move));
+  w.u32(uint32_t(m.state));
+  w.u8 (m.flags);
+  w.u8 (uint8_t(m.trigger));
+  w.u32(m.instance);
+  w.u32(m.count);
+  }
+
+void write(Writer& w, const MobTaken& m) {
+  w.u8 (uint8_t(MsgType::MobTaken));
+  w.u32(m.mob);
+  w.u32(m.instance);
+  w.u32(m.count);
+  w.u32(m.granted);
+  }
+
 std::optional<Message> readHello(Reader& r) {
   Hello    m;
   uint32_t magic = 0;
@@ -311,10 +355,17 @@ std::optional<Message> readPlayerSpawn(Reader& r) {
 
 std::optional<Message> readPlayerState(Reader& r) {
   PlayerState m;
+  uint8_t     anims = 0;
   if(!r.u32(m.playerId) || !r.u32(m.entityId) || m.entityId==0 || !r.u32(m.seq) || !r.u32(m.time) ||
      !r.f32(m.x) || !r.f32(m.y) || !r.f32(m.z) || !r.f32(m.rotation) ||
      !r.u32(m.bodyState) || !r.u16(m.anim) || !r.u8(m.walkMode) || !r.u8(m.weaponState) ||
-     !r.u32(m.spell) || !r.atEnd())
+     !r.u32(m.spell) || !r.u8(anims) || anims>MaxNpcAnims)
+    return std::nullopt;
+  m.anims.resize(anims);
+  for(auto& a:m.anims)
+    if(!r.str(a, MaxAnimNameLength) || a.empty())
+      return std::nullopt;
+  if(!r.atEnd())
     return std::nullopt;
   return m;
   }
@@ -456,6 +507,69 @@ std::optional<Message> readPlayerInventory(Reader& r) {
   return m;
   }
 
+bool readMobState(Reader& r, int32_t& state) {
+  uint32_t v = 0;
+  if(!r.u32(v))
+    return false;
+  state = int32_t(v);
+  return state>=NoMobState && state<=MaxMobState;
+  }
+
+bool readMobTrigger(Reader& r, MobTrigger& t) {
+  uint8_t v = 0;
+  if(!r.u8(v) || v>uint8_t(MobTrigger::Untrigger))
+    return false;
+  t = MobTrigger(v);
+  return true;
+  }
+
+std::optional<Message> readMobStateMsg(Reader& r) {
+  MobState m;
+  uint16_t count = 0;
+  if(!r.u32(m.mob) || !readMobState(r, m.state) || !r.u8(m.flags) || (m.flags & ~MobState::AllFlags)!=0 ||
+     !readMobTrigger(r, m.trigger) || !r.u32(m.by) || !r.u16(count) || count>MaxInventoryItems)
+    return std::nullopt;
+  m.items.resize(count);
+  for(size_t i=0; i<m.items.size(); ++i) {
+    auto& it = m.items[i];
+    if(!r.u32(it.instance) || it.instance==0 || !r.u32(it.count) || it.count==0 || it.count>MaxInventoryCount)
+      return std::nullopt;
+    if(i>0 && m.items[i-1].instance>=it.instance)
+      return std::nullopt; // sorted, so that every instance comes once
+    }
+  if(!r.atEnd())
+    return std::nullopt;
+  return m;
+  }
+
+std::optional<Message> readPlayerMob(Reader& r) {
+  PlayerMob m;
+  uint8_t   move = 0;
+  if(!r.u32(m.playerId) || !r.u32(m.entityId) || m.entityId==0 || !r.u32(m.mob) ||
+     !r.u8(move) || move<uint8_t(MobMove::State) || move>uint8_t(MobMove::Put) ||
+     !readMobState(r, m.state) || !r.u8(m.flags) || (m.flags & ~MobState::AllFlags)!=0 ||
+     !readMobTrigger(r, m.trigger) || !r.u32(m.instance) || !r.u32(m.count) || !r.atEnd())
+    return std::nullopt;
+  m.move = MobMove(move);
+  if(m.move==MobMove::State) {
+    if(m.instance!=0 || m.count!=0)
+      return std::nullopt;
+    } else {
+    if(m.instance==0 || m.count==0 || m.count>MaxInventoryCount ||
+       m.state!=NoMobState || m.flags!=0 || m.trigger!=MobTrigger::None)
+      return std::nullopt;
+    }
+  return m;
+  }
+
+std::optional<Message> readMobTaken(Reader& r) {
+  MobTaken m;
+  if(!r.u32(m.mob) || !r.u32(m.instance) || m.instance==0 || !r.u32(m.count) || m.count==0 ||
+     m.count>MaxInventoryCount || !r.u32(m.granted) || m.granted>m.count || !r.atEnd())
+    return std::nullopt;
+  return m;
+  }
+
 std::optional<Message> readNpcStates(Reader& r) {
   NpcStates m;
   uint8_t   count = 0;
@@ -523,6 +637,9 @@ std::optional<Message> NetProtocol::decode(const uint8_t* data, size_t size) {
     case MsgType::PlayerItem:   return readPlayerItem(r);
     case MsgType::ItemTaken:    return readItemTaken(r);
     case MsgType::PlayerInventory: return readPlayerInventory(r);
+    case MsgType::MobState:     return readMobStateMsg(r);
+    case MsgType::PlayerMob:    return readPlayerMob(r);
+    case MsgType::MobTaken:     return readMobTaken(r);
     }
   return std::nullopt;
   }

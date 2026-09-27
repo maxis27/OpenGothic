@@ -168,6 +168,34 @@ class NetSession final {
     // Client: the npc states received from the host since the last call, oldest first.
     auto     takeNpcStates() -> std::vector<NpcState>;
 
+    // Mobs of the host's world: doors, chests, levers, ... (MP-24). The host owns them: every player's character uses
+    // the mobs of its own world, a client sends what its character did with them to the host, and the host sends every
+    // change of its mobs to the clients.
+    using MobState  = NetProtocol::MobState;
+    using PlayerMob = NetProtocol::PlayerMob;
+    using MobTaken  = NetProtocol::MobTaken;
+    // Host: a mob of its world is not as the world file placed it any more, or has changed again. Sent to every client
+    // when it differs from the last one set for the mob or carries a trigger; newcomers get the latest one of every
+    // mob (without the trigger) right after Welcome. Ignored on a client.
+    void     setMob(const MobState& m);
+    // The mobs of the host's world that have changed, by mob: on the host as set, on a client as received, all
+    // without their triggers.
+    auto     mobs() const -> const std::map<uint32_t,MobState>& { return mobMap; }
+    // client: mob changes received and not taken yet, at most this many (the oldest go)
+    static constexpr size_t MaxPendingMobs = 4096;
+    // Client: the mob changes received from the host since the last call, oldest first, with their triggers; the
+    // trigger of a change this player's own character made (MobState::by) is left out: its world has sent it already.
+    auto     takeMobChanges() -> std::vector<MobState>;
+    // Client: sends what this player's character did with a mob to the host (playerId is filled in here); false when
+    // offline, and on the host.
+    bool     sendMob(const PlayerMob& e);
+    // Host: what the clients' characters did with mobs since the last call, oldest first.
+    auto     takePlayerMobs() -> std::vector<PlayerMob>;
+    // Host: the answer to a Take of player pid. Ignored on a client and for players not in the session.
+    void     answerMobTake(PlayerId pid, const MobTaken& answer);
+    // Client: the host's answers to this player's Takes since the last call, oldest first.
+    auto     takeMobAnswers() -> std::vector<MobTaken>;
+
     // Service the network: handshake, chat, players joining and leaving.
     void     poll(uint32_t timeoutMs = 0);
     // Send a chat line to the other players; false when offline or the text is empty.
@@ -224,6 +252,10 @@ class NetSession final {
     uint64_t                                         inventorySentAt = 0;
     std::map<uint32_t,Entity>                        entityMap;
     uint64_t                                         entityVersion = 0;
+    std::map<uint32_t,MobState>                      mobMap;
+    std::vector<MobState>                            mobChanges;
+    std::vector<PlayerMob>                           mobEvents;
+    std::vector<MobTaken>                            mobAnswers;
     // host: what each client has been sent of each npc; client: the npc states not taken yet
     struct NpcSent {
       NpcState st;

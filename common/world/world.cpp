@@ -222,6 +222,10 @@ Interactive* World::mobsiById(uint32_t id) {
   return nullptr;
   }
 
+uint32_t World::mobsiCount() const {
+  return uint32_t(wobj.mobsiCount());
+  }
+
 uint32_t World::itmId(const void *ptr) const {
   return wobj.itmId(ptr);
   }
@@ -829,6 +833,15 @@ void World::addNetItemEvent(const NetProtocol::PlayerItem& e) {
 
 auto World::takeNetItemEvents() -> std::vector<NetProtocol::PlayerItem> {
   return std::exchange(netItemEvents, {});
+  }
+
+void World::addNetMobEvent(const NetProtocol::PlayerMob& e) {
+  if(Gothic::inst().isNetClient() && netMobEvents.size()<MaxNetHits)
+    netMobEvents.push_back(e);
+  }
+
+auto World::takeNetMobEvents() -> std::vector<NetProtocol::PlayerMob> {
+  return std::exchange(netMobEvents, {});
   }
 
 size_t World::itemCount() const {

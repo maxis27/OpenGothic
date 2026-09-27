@@ -38,6 +38,12 @@ class World;
 //    equipped. The copies of the character get the same items, made by the scripts of their own world, at the moment
 //    of the player's movement the change came in, and equip the same weapons, armor, runes; the item's own scripts
 //    (on_equip) run for the copies too;
+//  - the mobs (doors, chests, levers, benches, ...) are the host's too (MP-24): every character uses the mobs of its
+//    own world, a client sends what its hero did (the state the mob went to, the trigger it sent to a gate, the items
+//    taken out of a container or put into it) and the host does the same to its mob. The host sends every change of
+//    its mobs to the clients (a newcomer gets all of them), which follow it, except for the mob their hero is using at
+//    the moment. Only the first player to take an item out of a container gets it. The copies of a player's
+//    character play the animations of the mob its player uses;
 //  - the host sends the time of day of its world, the clients take it over (MP-12);
 //  - characters of players who left are removed, all of them once the session is gone.
 // Called every frame. A newly loaded world has no remote players yet and is filled again.
@@ -47,5 +53,7 @@ namespace NetWorldSync {
   // how far from another player's character (on the host, which sees it a little late) an item it takes or drops can
   // be, cm
   constexpr float    ItemReach      = 1000.f;
+  // how far from another player's character (on the host) a mob it uses can be, cm
+  constexpr float    MobReach       = 1500.f;
   void tick(NetSession* session, World& world);
   }

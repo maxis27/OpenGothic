@@ -1,6 +1,7 @@
 #include "inventory.h"
 
 #include <Tempest/Log>
+#include <algorithm>
 
 #include "world/objects/item.h"
 #include "world/objects/npc.h"
@@ -269,6 +270,54 @@ Item* Inventory::addItem(size_t itemSymbol, size_t count, World &owner) {
     it->setCount(it->count()+count);
     return it;
     }
+  }
+
+auto Inventory::contents() const -> std::vector<std::pair<size_t,size_t>> {
+  std::vector<std::pair<size_t,size_t>> ret;
+  for(auto& i:items) {
+    auto at = std::find_if(ret.begin(), ret.end(), [&](const auto& e){ return e.first==i->clsId(); });
+    if(at==ret.end())
+      ret.emplace_back(i->clsId(), i->count()); else
+      at->second += i->count();
+    }
+  std::sort(ret.begin(), ret.end());
+  return ret;
+  }
+
+void Inventory::setItemCount(size_t cls, size_t count, World& owner) {
+  size_t have = 0;
+  for(auto& i:items)
+    if(i->clsId()==cls)
+      have += i->count();
+  if(count>have) {
+    addItem(cls, count-have, owner);
+    return;
+    }
+  size_t left = count;
+  for(size_t i=0; i<items.size();) {
+    auto& it = *items[i];
+    if(it.clsId()!=cls) {
+      ++i;
+      continue;
+      }
+    if(left>0) {
+      const size_t keep = std::min(left, it.count());
+      it.setCount(keep);
+      left -= keep;
+      ++i;
+      continue;
+      }
+    for(auto& s:mdlSlots)
+      if(s.item==&it)
+        s.item = nullptr;
+    std::erase_if(mdlSlots, [](const auto& s){ return s.item==nullptr; });
+    if(ammotSlot.item==&it)
+      ammotSlot.item = nullptr;
+    if(stateSlot.item==&it)
+      stateSlot.item = nullptr;
+    items.erase(items.begin()+int(i));
+    }
+  sorted = false;
   }
 
 void Inventory::delItem(size_t itemSymbol, size_t count, Npc& owner) {

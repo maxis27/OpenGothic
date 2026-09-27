@@ -268,6 +268,8 @@ void Interactive::tick(uint64_t dt) {
     }
 
   if(p==nullptr) {
+    if(netDriven)
+      return; // multiplayer: the world whose character used it last goes back to the start, this one follows
     // Note: oCMobInter::rewind, oCMobInter with killed user has to go back to state=-1
     // All other cases, oCMobFire, oCMobDoor in particular - preserve old state
     const int destSt = -1;
@@ -400,12 +402,12 @@ void Interactive::implTick(Pos& p) {
 
   if(state==0 && p.attachMode) {
     npc.world().sendPassivePerc(npc,npc,PERC_ASSESSUSEMOB);
-    emitTriggerEvent(TriggerEvent::T_Trigger);
+    netTrigger(TriggerEvent::T_Trigger);
     }
 
   if(state==stateNum && p.attachMode && reverseState) {
     npc.world().sendPassivePerc(npc,npc,PERC_ASSESSUSEMOB);
-    emitTriggerEvent(TriggerEvent::T_Untrigger);
+    netTrigger(TriggerEvent::T_Untrigger);
     }
 
   if(npc.isPlayer() && !loopState && attach) {
@@ -512,6 +514,37 @@ void Interactive::emitTriggerEvent(TriggerEvent::Type type) const {
     return;
   const TriggerEvent evt(triggerTarget,vobName,waitAnim,type);
   world.triggerEvent(evt);
+  }
+
+void Interactive::netTrigger(TriggerEvent::Type type) {
+  emitTriggerEvent(type);
+  ++useTriggers;
+  lastTrigger = type;
+  }
+
+bool Interactive::isInUse() const {
+  for(auto& i:attPos)
+    if(i.user!=nullptr)
+      return true;
+  return false;
+  }
+
+void Interactive::netSetState(int32_t st) {
+  st = std::clamp(st, -1, stateNum);
+  netDriven = true;
+  if(st==state)
+    return;
+  // a step (a door opening, a lever pulled) is played; a jump, e.g. for a newcomer, goes straight to the state
+  const int32_t from = std::max(state, 0);
+  const int32_t to   = std::max(st, 0);
+  const Animation::Sequence* sq = nullptr;
+  if(from!=to && std::abs(from-to)==1)
+    sq = visual.startAnimAndGet(string_frm("T_S",from,"_2_S",to), world.tickCount());
+  if(sq==nullptr)
+    visual.startAnimAndGet(string_frm("S_S",to), world.tickCount(), true);
+  loopState = false;
+  netDriven = true;
+  setState(st);
   }
 
 void Interactive::emitSoundEffect(std::string_view sound, float range, bool freeSlot) {
@@ -818,6 +851,7 @@ bool Interactive::attach(Npc& npc, Interactive::Pos& to) {
   to.user       = &npc;
   to.started    = NotStarted;
   to.attachMode = true;
+  netDriven     = false;
   return true;
   }
 

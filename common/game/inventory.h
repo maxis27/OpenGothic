@@ -71,6 +71,9 @@ class Inventory final {
     Item*  addItem(std::string_view name, size_t count, World &owner);
     Item*  addItem(size_t cls, size_t count, World &owner);
     void   delItem(size_t cls, size_t count, Npc &owner);
+    // contents of a container (no owner to equip anything): how many of each instance, and leaving count of cls
+    auto   contents() const -> std::vector<std::pair<size_t,size_t>>;
+    void   setItemCount(size_t cls, size_t count, World& owner);
     bool   use    (size_t cls, Npc &owner, uint8_t slotHint, bool force);
     bool   equip  (size_t cls, Npc &owner, bool force);
     bool   unequip(size_t cls, Npc &owner);

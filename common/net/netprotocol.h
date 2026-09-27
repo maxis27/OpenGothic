@@ -20,9 +20,13 @@
 namespace NetProtocol {
 
   // bump on every incompatible change of any message
-  constexpr uint16_t Version = 15;
+  constexpr uint16_t Version = 16;
   // "OGMP", identifies OpenGothic multiplayer traffic
   constexpr uint32_t Magic   = 0x504D474F;
+
+  // animations of a character sent in NpcState and PlayerState, and the length of their names
+  constexpr size_t   MaxNpcAnims       = 4;
+  constexpr size_t   MaxAnimNameLength = 48;
 
   // players in one session, the host included
   constexpr size_t   MaxPlayers     = 8;
@@ -50,6 +54,9 @@ namespace NetProtocol {
     PlayerItem   = 15,
     ItemTaken    = 16,
     PlayerInventory = 17,
+    MobState     = 18,
+    PlayerMob    = 19,
+    MobTaken     = 20,
     };
 
   enum class RejectReason : uint8_t {
@@ -133,6 +140,9 @@ namespace NetProtocol {
     uint8_t     weaponState = 0;   // WeaponState
     uint32_t    spell       = 0;   // script symbol of the rune or scroll in hand (weaponState Mage), 0: none (MP-18);
                                    // the weapons the character has on come with PlayerInventory (MP-23)
+    // while the character uses a mob (MP-24): the names of the animations playing, like NpcState::anims (at most
+    // MaxNpcAnims of MaxAnimNameLength); empty otherwise, when anim says what the character does
+    std::vector<std::string> anims;
     };
 
   // server -> client, about once a second and after every jump of the clock: the time of day in
@@ -238,9 +248,6 @@ namespace NetProtocol {
     uint32_t    entityId = 0;   // never 0
     };
 
-  // animations of an npc sent in NpcState, and the length of their names
-  constexpr size_t MaxNpcAnims       = 4;
-  constexpr size_t MaxAnimNameLength = 48;
   // npcs in one NpcStates packet (the sender splits them to stay under the MTU)
   constexpr size_t MaxNpcStates      = 255;
 
@@ -349,9 +356,81 @@ namespace NetProtocol {
     bool operator == (const PlayerInventory& o) const = default;
     };
 
+  // Mobs (MP-24): the doors, chests, levers, benches, ... placed with the world. A mob is named by its place among the
+  // mobs of the world (World::mobsiById), the same in every world loaded from the same world file.
+  // highest state of a mob (Interactive::stateCount), and the state of one nobody has used (-1)
+  constexpr int32_t  MaxMobState = 64;
+  constexpr int32_t  NoMobState  = -1;
+
+  // the trigger event a mob sends to its target (a gate moved by a lever, ...) as it is used
+  enum class MobTrigger : uint8_t {
+    None      = 0,
+    Trigger   = 1,
+    Untrigger = 2,
+    };
+
+  // one item in a container: all of its items of one instance
+  struct MobItem {
+    uint32_t    instance = 0;     // script symbol of the item (C_ITEM), never 0
+    uint32_t    count    = 0;     // how many, 1..MaxInventoryCount
+
+    bool operator == (const MobItem& o) const = default;
+    };
+
+  // server -> client, reliable: a mob of the server's world is in another state than the world file placed it in, or
+  // has other contents (MP-24). The server owns the mobs: sent whenever one changes, and to a newcomer right after
+  // Welcome for every mob changed since the world was loaded. Npcs and the players' characters use the mobs of their
+  // own worlds: a player's changes reach the server with PlayerMob, and the server sends them on with this.
+  struct MobState {
+    enum Flag : uint8_t {
+      Cracked  = 1<<0, // the lock is open (picked, or opened with the key): nobody needs to pick it again
+      AllFlags = (1<<1)-1,
+      };
+    uint32_t    mob      = 0;
+    int32_t     state    = NoMobState; // NoMobState..MaxMobState
+    uint8_t     flags    = 0;   // Flag
+    MobTrigger  trigger  = MobTrigger::None; // sent by the mob to its target in this change; never to a newcomer
+    uint32_t    by       = 0;   // the player whose character made this change (a client leaves the trigger to its own
+                                // world), 0: the server's world itself
+    std::vector<MobItem> items; // containers only: all of their contents, at most MaxInventoryItems, sorted by instance
+
+    bool operator == (const MobState& o) const = default;
+    };
+
+  // what a player's character does with a mob
+  enum class MobMove : uint8_t {
+    State = 1, // uses it: the mob is in state now
+    Take  = 2, // takes items out of a container
+    Put   = 3, // puts items into a container
+    };
+
+  // player -> server, reliable: a player's character has used a mob of the player's world (MP-24). The server does
+  // the same to its mob and sends the change to everybody (MobState). A Take is answered with MobTaken: somebody else
+  // may have taken the items first.
+  struct PlayerMob {
+    uint32_t    playerId = 0;
+    uint32_t    entityId = 0;   // the character (PlayerSpawn::entityId)
+    uint32_t    mob      = 0;
+    MobMove     move     = MobMove::State;
+    int32_t     state    = NoMobState; // State: NoMobState..MaxMobState; NoMobState otherwise
+    uint8_t     flags    = 0;   // State: MobState::Flag; 0 otherwise
+    MobTrigger  trigger  = MobTrigger::None; // State: sent by the mob on the way; None otherwise
+    uint32_t    instance = 0;   // Take, Put: script symbol of the item, never 0; 0 otherwise
+    uint32_t    count    = 0;   // Take, Put: how many, 1..MaxInventoryCount; 0 otherwise
+    };
+
+  // server -> player, reliable: the answer to the player's Take: how many of the items were still in the container and
+  // are the player's now; the player gives the rest back (its character has taken them already)
+  struct MobTaken {
+    uint32_t    mob      = 0;
+    uint32_t    instance = 0;   // never 0
+    uint32_t    count    = 0;   // asked for, 1..MaxInventoryCount
+    uint32_t    granted  = 0;   // 0..count
+    };
+
   using Message = std::variant<Hello,Welcome,Reject,Chat,PlayerJoined,PlayerLeft,PlayerSpawn,PlayerState,WorldTime,
                                PlayerAttack,Hit,SpawnEntity,DespawnEntity,NpcStates,PlayerItem,ItemTaken,
-                               PlayerInventory>;
+                               PlayerInventory,MobState,PlayerMob,MobTaken>;
 
   std::vector<uint8_t> encode(const Message& msg);
   // Returns nothing for truncated, oversized or unknown packets.
