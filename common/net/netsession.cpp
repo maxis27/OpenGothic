@@ -337,6 +337,12 @@ void NetSession::setWorldTime(int64_t time) {
   sendOthers(NetTransport::InvalidPeer, WorldTime{time});
   }
 
+auto NetSession::takeJoinedWorld() -> std::optional<std::string> {
+  if(!std::exchange(worldJoined, false) || world.empty())
+    return std::nullopt;
+  return world;
+  }
+
 auto NetSession::takeWorldTime() -> std::optional<int64_t> {
   if(server)
     return std::nullopt;
@@ -658,6 +664,8 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
       return;
     st             = State::Online;
     self           = m->playerId;
+    world          = m->worldName.substr(0, MaxWorldLength);
+    worldJoined    = true;
     players[self]  = name;
     notify("Joined the game as " + name + ", players online: " + std::to_string(players.size()));
     return;

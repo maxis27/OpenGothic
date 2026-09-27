@@ -850,7 +850,10 @@ void GameMenu::execSingle(Item &it, int slideDx, KeyCodec::Action hint) {
         Gothic::inst().emitGlobalSound(Gothic::inst().loadSoundFx("MENU_ESC"));
 
         if(onSelAction_S[i]=="NEW_GAME") {
-          Gothic::inst().onStartGame(Gothic::inst().defaultWorld());
+          // multiplayer starts the session's world by itself; a new game would reset it under the other players
+          if(Gothic::inst().isMultiplayer())
+            Gothic::inst().onPrint("New game is disabled in multiplayer"); else
+            Gothic::inst().onStartGame(Gothic::inst().defaultWorld());
           }
         else if(onSelAction_S[i]=="LEAVE_GAME") {
           Log::i("Exiting, by item action (`LEAVE_GAME`)");

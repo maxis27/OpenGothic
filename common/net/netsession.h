@@ -47,6 +47,10 @@ class NetSession final {
     auto     playerList() const -> const std::map<PlayerId,std::string>& { return players; }
     // Name of a player in the session, empty when unknown.
     auto     playerName(PlayerId id) const -> std::string_view;
+    // World the session plays in: the host's own; on a client the one named in Welcome, empty before it.
+    auto     worldName() const -> std::string_view { return world; }
+    // Client: the host's world once, right after Welcome, so the game can load it; nothing otherwise.
+    auto     takeJoinedWorld() -> std::optional<std::string>;
 
     // Character of a player in the host's world, nullptr while the host hasn't spawned it.
     using Avatar = NetProtocol::PlayerSpawn;
@@ -233,6 +237,7 @@ class NetSession final {
     PlayerId                                         self   = NoPlayer;
     std::string                                      name;
     std::string                                      world;
+    bool                                             worldJoined = false;
     uint64_t                                         startTime = 0;
 
     std::map<PlayerId,std::string>                   players;
