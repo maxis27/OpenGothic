@@ -3736,7 +3736,9 @@ void Npc::onWldItemRemoved(const Item& itm) {
   }
 
 void Npc::addItem(size_t id, Interactive &chest, size_t count) {
+  const size_t before = invent.itemCount(id);
   Inventory::transfer(invent,chest.inventory(),nullptr,id,count,owner);
+  reportNetMobItem(chest, NetProtocol::MobMove::Take, id, invent.itemCount(id)-std::min(before,invent.itemCount(id)));
   }
 
 void Npc::addItem(size_t id, Npc &from, size_t count) {
@@ -3744,7 +3746,24 @@ void Npc::addItem(size_t id, Npc &from, size_t count) {
   }
 
 void Npc::moveItem(size_t id, Interactive &to, size_t count) {
+  const size_t before = invent.itemCount(id);
   Inventory::transfer(to.inventory(),invent,this,id,count,owner);
+  reportNetMobItem(to, NetProtocol::MobMove::Put, id, before-std::min(before,invent.itemCount(id)));
+  }
+
+void Npc::reportNetMobItem(Interactive& chest, NetProtocol::MobMove move, size_t id, size_t count) {
+  // the host owns the containers (MP-24): what the local hero of a client moves is sent to it
+  if(!isPlayer() || count==0 || !Gothic::inst().isNetClient())
+    return;
+  const uint32_t mob = owner.mobsiId(&chest);
+  if(mob==uint32_t(-1))
+    return;
+  NetProtocol::PlayerMob e;
+  e.mob      = mob;
+  e.move     = move;
+  e.instance = uint32_t(id);
+  e.count    = uint32_t(std::min<size_t>(count, NetProtocol::MaxInventoryCount));
+  owner.addNetMobEvent(e);
   }
 
 void Npc::sellItem(size_t id, Npc &to, size_t count) {

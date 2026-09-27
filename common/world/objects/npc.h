@@ -19,7 +19,7 @@
 
 #include <zenkit/addon/daedalus.hh>
 
-namespace NetProtocol { struct Hit; }
+namespace NetProtocol { struct Hit; enum class MobMove : uint8_t; }
 
 class Interactive;
 class WayPoint;
@@ -533,6 +533,8 @@ class Npc final {
       };
 
     void      updateWeaponSkeleton();
+    // multiplayer client: the local hero has moved count of item id out of chest (Take) or into it (Put), MP-24
+    void      reportNetMobItem(Interactive& chest, NetProtocol::MobMove move, size_t id, size_t count);
     void      tickTimedEvt(Animation::EvCount &ev);
     void      tickRegen(int32_t& v,const int32_t max,const int32_t chg, const uint64_t dt);
     void      setViewPosition(const Tempest::Vec3& pos);

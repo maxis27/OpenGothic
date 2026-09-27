@@ -80,6 +80,16 @@ class Interactive : public Vob {
     bool                isStaticState() const;
     bool                isDetachState(const Npc& npc) const;
     bool                canQuitAtState(const Npc& npc, int32_t state) const;
+    // multiplayer (MP-24): somebody uses it; the trigger events it has sent to its target as it was used, and the last one
+    bool                isInUse() const;
+    uint32_t            useTriggerCount() const { return useTriggers; }
+    auto                lastUseTrigger() const -> TriggerEvent::Type { return lastTrigger; }
+    // multiplayer: goes to state st as the host's (or a player's) did, with the animation of the step when it is one,
+    // and follows that world until somebody here uses it; netTrigger sends a trigger event to its target, counted
+    // like the ones it sends as it is used here
+    void                netSetState(int32_t st);
+    void                netTrigger(TriggerEvent::Type type);
+
     bool                attach(Npc& npc);
     bool                detach(Npc& npc, bool quick);
     bool                isAttached(const Npc& to);
@@ -172,6 +182,11 @@ class Interactive : public Vob {
 
     uint64_t            waitAnim      = 0;
     bool                animChanged   = false;
+
+    // multiplayer: its state comes from another world (netSetState), which also rewinds it when its user leaves
+    bool                netDriven     = false;
+    uint32_t            useTriggers   = 0;
+    TriggerEvent::Type  lastTrigger   = TriggerEvent::T_Trigger;
 
     std::vector<Pos>    attPos;
     ObjVisual           visual;

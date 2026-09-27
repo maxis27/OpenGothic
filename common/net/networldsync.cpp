@@ -11,6 +11,7 @@
 #include "game/gamescript.h"
 #include "graphics/mesh/animationsolver.h"
 #include "game/inventory.h"
+#include "world/objects/interactive.h"
 #include "world/objects/item.h"
 #include "world/objects/npc.h"
 #include "world/world.h"
@@ -236,6 +237,275 @@ void receiveGroundItems(NetSession& session, World& world) {
     }
   }
 
+// the contents of a container, as MobState has them: one entry per instance, sorted by instance
+std::vector<NetProtocol::MobItem> mobItems(Interactive& mob) {
+  std::vector<NetProtocol::MobItem> ret;
+  for(auto& [cls,count]:mob.inventory().contents()) {
+    if(count==0 || ret.size()>=NetProtocol::MaxInventoryItems)
+      continue;
+    ret.push_back({uint32_t(cls), uint32_t(std::min<size_t>(count, NetProtocol::MaxInventoryCount))});
+    }
+  return ret;
+  }
+
+// the mob as it is in this world, as MobState has it
+World::NetMob mobNow(Interactive& mob) {
+  World::NetMob m;
+  m.state    = std::clamp(mob.stateId(), NetProtocol::NoMobState, NetProtocol::MaxMobState);
+  m.flags    = mob.isCracked() ? NetProtocol::MobState::Cracked : 0;
+  m.triggers = mob.useTriggerCount();
+  if(mob.isContainer())
+    m.items = mobItems(mob);
+  return m;
+  }
+
+// fills the mobs of world.netMobs() as they are now, when the world is new; false when it had them already
+bool initMobs(World& world) {
+  auto& cache = world.netMobs();
+  const uint32_t count = world.mobsiCount();
+  if(cache.size()==count)
+    return false;
+  cache.clear();
+  cache.reserve(count);
+  for(uint32_t i=0; i<count; ++i)
+    cache.push_back(mobNow(*world.mobsiById(i)));
+  world.netMobsDeferred().clear();
+  return true;
+  }
+
+NetProtocol::MobTrigger toMobTrigger(TriggerEvent::Type t) {
+  return t==TriggerEvent::T_Untrigger ? NetProtocol::MobTrigger::Untrigger : NetProtocol::MobTrigger::Trigger;
+  }
+
+TriggerEvent::Type fromMobTrigger(NetProtocol::MobTrigger t) {
+  return t==NetProtocol::MobTrigger::Untrigger ? TriggerEvent::T_Untrigger : TriggerEvent::T_Trigger;
+  }
+
+// host: the mobs of its world that have changed since the last frame, for the clients (MP-24). The world as loaded is
+// what the clients' worlds have too; only changes are sent. A container's contents are looked at while somebody uses it,
+// when it changes state, and when another player has taken or put something
+void sendMobs(NetSession& session, World& world) {
+  if(initMobs(world))
+    return;
+  auto& cache = world.netMobs();
+  for(uint32_t i=0; i<cache.size(); ++i) {
+    Interactive& mob = *world.mobsiById(i);
+    auto&        c   = cache[i];
+    const int32_t  state    = std::clamp(mob.stateId(), NetProtocol::NoMobState, NetProtocol::MaxMobState);
+    const uint8_t  flags    = mob.isCracked() ? NetProtocol::MobState::Cracked : 0;
+    const uint32_t triggers = mob.useTriggerCount();
+    const bool     changed  = state!=c.state || flags!=c.flags || triggers!=c.triggers;
+    bool           content  = false;
+    std::vector<NetProtocol::MobItem> items;
+    if(mob.isContainer() && (changed || c.by!=0 || mob.isInUse())) {
+      items   = mobItems(mob);
+      content = items!=c.items;
+      }
+    if(!changed && !content) {
+      c.by = 0;
+      continue;
+      }
+    NetSession::MobState m;
+    m.mob   = i;
+    m.state = state;
+    m.flags = flags;
+    m.by    = c.by;
+    if(triggers!=c.triggers)
+      m.trigger = toMobTrigger(mob.lastUseTrigger());
+    if(mob.isContainer())
+      m.items = items;
+    c.state    = state;
+    c.flags    = flags;
+    c.triggers = triggers;
+    c.items    = std::move(items);
+    c.by       = 0;
+    session.setMob(m);
+    }
+  }
+
+// host: the character of another player is near enough to the mob it has used, cm (the host sees it a little late)
+bool isNearMob(const Npc& npc, const Interactive& mob) {
+  const float reach = NetWorldSync::MobReach;
+  return (npc.position()-mob.position()).quadLength()<=reach*reach;
+  }
+
+// host: what the other players' characters did with the mobs of their worlds is done to the mobs of this one, and sent
+// on to everybody by sendMobs
+void receivePlayerMobs(NetSession& session, World& world) {
+  using M = NetProtocol::MobMove;
+  auto& ids   = world.netEntities();
+  auto& cache = world.netMobs();
+  for(auto& e:session.takePlayerMobs()) {
+    Npc*         npc = world.remotePlayer(e.playerId);
+    Interactive* mob = world.mobsiById(e.mob);
+    bool         ok  = npc!=nullptr && ids.id(*npc)==NetEntityId{e.entityId} && mob!=nullptr;
+    if(ok && !isNearMob(*npc, *mob)) {
+      Log::i("multiplayer: ", npc->displayName(), " is too far away from ", mob->tag(), " to use it");
+      ok = false;
+      }
+    if(ok && e.move!=M::State && !mob->isContainer())
+      ok = false;
+    if(ok && e.mob<cache.size())
+      cache[e.mob].by = e.playerId;
+
+    switch(e.move) {
+      case M::State:
+        if(!ok || mob->isInUse())
+          break; // somebody of this world is using it: this world's use goes on, the player's world follows it later
+        mob->netSetState(e.state);
+        if(e.flags & NetProtocol::MobState::Cracked)
+          mob->setAsCracked(true);
+        if(e.trigger!=NetProtocol::MobTrigger::None)
+          mob->netTrigger(fromMobTrigger(e.trigger)); // a gate opened by a lever opens here too
+        break;
+      case M::Take: {
+        uint32_t granted = 0;
+        if(ok) {
+          const size_t have = mob->inventory().itemCount(e.instance);
+          granted = uint32_t(std::min<size_t>(have, e.count));
+          mob->inventory().setItemCount(e.instance, have-granted, world);
+          }
+        // the player puts them into its own inventory, which its copies get with its next PlayerInventory (MP-23)
+        session.answerMobTake(e.playerId, {e.mob, e.instance, e.count, granted});
+        break;
+        }
+      case M::Put:
+        if(!ok)
+          break;
+        if(!isItemInstance(world, e.instance)) {
+          Log::e("multiplayer: unknown item ", e.instance, " put into ", mob->tag(), " by ", npc->displayName());
+          break;
+          }
+        mob->inventory().setItemCount(e.instance, mob->inventory().itemCount(e.instance)+e.count, world);
+        break;
+      }
+    }
+  }
+
+// client: gives the mob of this world what the host's has; false while the local hero uses it (applied once it lets go)
+bool applyMob(World& world, const NetSession::MobState& m) {
+  Interactive* mob = world.mobsiById(m.mob);
+  if(mob==nullptr)
+    return true; // another world file than the host's?
+  if(mob==world.player()->interactive())
+    return false;
+  if(mob->stateId()!=m.state)
+    mob->netSetState(m.state);
+  if(m.flags & NetProtocol::MobState::Cracked)
+    mob->setAsCracked(true);
+  if(mob->isContainer() && mobItems(*mob)!=m.items) {
+    auto& inv = mob->inventory();
+    for(auto& [cls,count]:inv.contents()) {
+      const bool keep = std::any_of(m.items.begin(), m.items.end(), [&](const auto& i){ return i.instance==cls; });
+      if(!keep)
+        inv.setItemCount(cls, 0, world);
+      }
+    for(auto& i:m.items) {
+      if(!isItemInstance(world, i.instance)) {
+        Log::e("multiplayer: unknown item ", i.instance, " in ", mob->tag());
+        continue;
+        }
+      inv.setItemCount(i.instance, i.count, world);
+      }
+    }
+  // what this world has agreed on with the host: the local hero's changes are the ones from here on
+  auto& cache = world.netMobs();
+  if(m.mob<cache.size())
+    cache[m.mob] = mobNow(*mob);
+  return true;
+  }
+
+// client: the mobs of this world follow the host's (MP-24); the ones the local hero is using wait until it lets go
+void receiveMobs(NetSession& session, World& world) {
+  auto& waiting = world.netMobsDeferred();
+  if(initMobs(world)) {
+    // a new world: everything the host has changed since its world was loaded
+    for(auto& [id,m]:session.mobs())
+      if(!applyMob(world, m))
+        waiting[id] = m;
+    }
+  for(auto& m:session.takeMobChanges()) {
+    Interactive* mob = world.mobsiById(m.mob);
+    if(mob!=nullptr && m.trigger!=NetProtocol::MobTrigger::None)
+      mob->emitTriggerEvent(fromMobTrigger(m.trigger)); // not netTrigger: this world didn't use the mob
+    if(applyMob(world, m))
+      waiting.erase(m.mob); else
+      waiting[m.mob] = m;
+    }
+  for(auto it=waiting.begin(); it!=waiting.end();) {
+    if(applyMob(world, it->second))
+      it = waiting.erase(it); else
+      ++it;
+    }
+  }
+
+// client: what the local hero does with mobs, for the host to do the same (MP-24): the state of the mob it uses or used
+// last whenever it changes (also as it goes back by itself when the hero has let go), and the items it takes out of
+// containers and puts into them
+void sendMobUse(NetSession& session, World& world) {
+  static const World*  inWorld = nullptr;
+  static const Npc*    hero    = nullptr;
+  static Interactive*  last    = nullptr;
+
+  auto& pl = *world.player();
+  if(inWorld!=&world || hero!=&pl) {
+    inWorld = &world;
+    hero    = &pl;
+    last    = nullptr;
+    }
+  if(pl.interactive()!=nullptr)
+    last = pl.interactive();
+
+  const NetEntityId id = world.netEntities().id(pl);
+  auto& cache = world.netMobs();
+  if(last!=nullptr && id) {
+    const uint32_t mid = world.mobsiId(last);
+    if(mid<cache.size()) {
+      auto&      c   = cache[mid];
+      World::NetMob now; // what MobState has of it, the contents aside: those go as Take and Put
+      now.state    = std::clamp(last->stateId(), NetProtocol::NoMobState, NetProtocol::MaxMobState);
+      now.flags    = last->isCracked() ? NetProtocol::MobState::Cracked : 0;
+      now.triggers = last->useTriggerCount();
+      if(now.state!=c.state || now.flags!=c.flags || now.triggers!=c.triggers) {
+        NetSession::PlayerMob e;
+        e.entityId = id.value;
+        e.mob      = mid;
+        e.move     = NetProtocol::MobMove::State;
+        e.state    = now.state;
+        e.flags    = now.flags;
+        if(now.triggers!=c.triggers)
+          e.trigger = toMobTrigger(last->lastUseTrigger());
+        session.sendMob(e);
+        c.state    = now.state;
+        c.flags    = now.flags;
+        c.triggers = now.triggers;
+        }
+      }
+    }
+
+  for(auto& e:world.takeNetMobEvents()) {
+    if(!id)
+      continue;
+    NetSession::PlayerMob msg = e;
+    msg.entityId = id.value;
+    session.sendMob(msg);
+    }
+  }
+
+// client: the host's answers to the local hero's takes from containers; what somebody else was quicker to take is given
+// back (the hero took it already, see Npc::addItem)
+void receiveMobAnswers(NetSession& session, World& world) {
+  auto& pl = *world.player();
+  for(auto& a:session.takeMobAnswers()) {
+    if(a.granted>=a.count)
+      continue;
+    const size_t back = std::min<size_t>(a.count-a.granted, pl.inventory().itemCount(a.instance));
+    if(back>0)
+      pl.delItem(a.instance, uint32_t(back));
+    Log::i("multiplayer: somebody else has taken ", a.count-a.granted, " of the items out of that container first");
+    }
+  }
+
 // client: has the npcs the host has spawned, and no others (World::addNpc refuses on a client)
 void receiveNpcs(NetSession& session, World& world) {
   if(world.netNpcsVersion()==session.entitiesVersion())
@@ -428,6 +698,9 @@ void sendState(NetSession& session, World& world) {
   s.weaponState = uint8_t(pl.weaponState());
   if(auto it = pl.inventory().activeWeapon(); it!=nullptr && pl.weaponState()==WeaponState::Mage)
     s.spell = uint32_t(it->clsId());
+  // using a mob, the hero plays the mob's animations: the copies play the same ones (MP-24)
+  if(pl.interactive()!=nullptr)
+    pl.netAnims(s.anims, NetProtocol::MaxNpcAnims, NetProtocol::MaxAnimNameLength);
   session.sendPlayerState(s);
   }
 
@@ -990,7 +1263,15 @@ void applyStates(NetSession& session, World& world) {
       continue;
       }
     applyWeapon(*r.npc, WeaponState(cur.state->weaponState), cur.state->spell);
-    applyAnim(r, *cur.state, turn*1000.f/float(TurnWindow));
+    // using a mob (MP-24), the character plays the animations its player's plays; the mob itself follows the host's
+    auto& anims = cur.state->anims;
+    if(!anims.empty() || !r.anims.empty()) {
+      r.npc->netPlayAnims(r.anims, anims, BodyState(cur.state->bodyState & BS_MAX));
+      r.anims = anims;
+      }
+    if(anims.empty())
+      applyAnim(r, *cur.state, turn*1000.f/float(TurnWindow)); else
+      r.anim = cur.state->anim;
 
     // attacks at the moment of the player's movement they were started in, with its weapon drawn
     while(!r.attacks.empty() && int64_t(r.attacks.front().time)<=t) {
@@ -1025,6 +1306,7 @@ void NetWorldSync::tick(NetSession* session, World& world) {
   if(!online || world.player()==nullptr) {
     world.takeNetHits(); // nobody to send them to
     world.takeNetItemEvents();
+    world.takeNetMobEvents();
     world.clearNetTakes();
     return;
     }
@@ -1033,6 +1315,8 @@ void NetWorldSync::tick(NetSession* session, World& world) {
     receiveItems(*session, world); // before sendEntities: the items taken go out with it
     sendEntities(*session, world);
     sendNpcStates(*session, world);
+    receivePlayerMobs(*session, world); // before sendMobs: the players' changes go out with it
+    sendMobs(*session, world);
     } else {
     tickClient(*session, world);
     receiveAnswers(*session, world);
@@ -1040,6 +1324,9 @@ void NetWorldSync::tick(NetSession* session, World& world) {
     receiveNpcStates(*session, world);
     applyNpcStates(world);
     receiveItems(*session, world);
+    sendMobUse(*session, world); // before receiveMobs: what the host sends back isn't taken for the hero's own
+    receiveMobs(*session, world);
+    receiveMobAnswers(*session, world);
     }
   sendItems  (*session, world);
   sendInventory(*session, world);

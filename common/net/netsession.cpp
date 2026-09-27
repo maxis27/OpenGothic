@@ -266,6 +266,50 @@ auto NetSession::takeAnswers() -> std::vector<ItemTaken> {
   return std::exchange(answers, {});
   }
 
+void NetSession::setMob(const MobState& m) {
+  if(!server)
+    return;
+  MobState keep = m;
+  keep.trigger = MobTrigger::None;
+  keep.by      = 0;
+  auto it = mobMap.find(m.mob);
+  const bool same = it!=mobMap.end() && it->second==keep;
+  if(same && m.trigger==MobTrigger::None)
+    return;
+  mobMap[m.mob] = std::move(keep);
+  if(st==State::Online)
+    sendOthers(NetTransport::InvalidPeer, m);
+  }
+
+auto NetSession::takeMobChanges() -> std::vector<MobState> {
+  return std::exchange(mobChanges, {});
+  }
+
+bool NetSession::sendMob(const PlayerMob& e) {
+  if(server || st!=State::Online || e.entityId==0)
+    return false;
+  PlayerMob msg = e;
+  msg.playerId = self;
+  send(hostPeer, msg);
+  return true;
+  }
+
+auto NetSession::takePlayerMobs() -> std::vector<PlayerMob> {
+  return std::exchange(mobEvents, {});
+  }
+
+void NetSession::answerMobTake(PlayerId pid, const MobTaken& answer) {
+  if(!server || answer.instance==0)
+    return;
+  for(auto& [peer,id]:peers)
+    if(id==pid && pid!=NoPlayer)
+      send(peer, answer);
+  }
+
+auto NetSession::takeMobAnswers() -> std::vector<MobTaken> {
+  return std::exchange(mobAnswers, {});
+  }
+
 void NetSession::sendHit(const Hit& h) {
   if(!server || st!=State::Online || h.target==0)
     return;
@@ -426,6 +470,10 @@ void NetSession::clearWorld() {
   entityMap.clear();
   npcSent.clear();
   npcStates.clear();
+  mobMap.clear();
+  mobChanges.clear();
+  mobEvents.clear();
+  mobAnswers.clear();
   }
 
 void NetSession::forgetPlayer(PlayerId id) {
@@ -437,6 +485,7 @@ void NetSession::forgetPlayer(PlayerId id) {
   latestInventory.erase(id);
   std::erase_if(attacks,    [id](const PlayerAttack& a){ return a.playerId==id; });
   std::erase_if(itemEvents, [id](const PlayerItem&   e){ return e.playerId==id; });
+  std::erase_if(mobEvents,  [id](const PlayerMob&    e){ return e.playerId==id; });
   }
 
 void NetSession::poll(uint32_t timeoutMs) {
@@ -520,6 +569,16 @@ void NetSession::hostEvent(const NetTransport::Event& e) {
     onInventory(from, *inv, e.peer);
     return;
     }
+  if(auto mob = std::get_if<PlayerMob>(&*msg)) {
+    // a player acts only with its own character
+    auto av = avatars.find(from);
+    if(av==avatars.end() || av->second.entityId!=mob->entityId || mobEvents.size()>=MaxPending)
+      return;
+    PlayerMob m = *mob;
+    m.playerId  = from;
+    mobEvents.push_back(m);
+    return;
+    }
   if(auto chat = std::get_if<Chat>(&*msg)) {
     const std::string line = sanitize(chat->text);
     sendOthers(e.peer, Chat{from, line});
@@ -552,6 +611,8 @@ void NetSession::onHello(NetTransport::PeerId peer, const Hello& hello) {
     send(peer, WorldTime{*worldTime});
   for(auto& [eid,e]:entityMap)
     send(peer, e);
+  for(auto& [mob,m]:mobMap)
+    send(peer, m);
   sendOthers(peer, PlayerJoined{id, hello.name});
 
   peers[peer] = id;
@@ -649,6 +710,26 @@ void NetSession::clientEvent(const NetTransport::Event& e) {
   if(auto m = std::get_if<ItemTaken>(&*msg)) {
     if(st==State::Online && answers.size()<MaxPending)
       answers.push_back(*m);
+    return;
+    }
+  if(auto m = std::get_if<MobState>(&*msg)) {
+    if(st!=State::Online)
+      return;
+    MobState change = *m;
+    if(change.by==self)
+      change.trigger = MobTrigger::None;
+    mobChanges.push_back(std::move(change));
+    if(mobChanges.size()>MaxPendingMobs)
+      mobChanges.erase(mobChanges.begin());
+    MobState keep = *m;
+    keep.trigger = MobTrigger::None;
+    keep.by      = 0;
+    mobMap[m->mob] = std::move(keep);
+    return;
+    }
+  if(auto m = std::get_if<MobTaken>(&*msg)) {
+    if(st==State::Online && mobAnswers.size()<MaxPending)
+      mobAnswers.push_back(*m);
     return;
     }
   if(auto m = std::get_if<Hit>(&*msg)) {

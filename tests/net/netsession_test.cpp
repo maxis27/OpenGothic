@@ -534,6 +534,60 @@ void testSession(uint16_t port) {
 
   testNpcStates(host, diego, milten);
 
+  // mobs (MP-24): the host sends every change of its mobs, the clients send what their characters did
+  using Mob = NetSession::MobState;
+  diego.session->setMob({50, 1}); // clients can't
+  host.session->setMob({50, 1, Mob::Cracked, NetProtocol::MobTrigger::Trigger, diegoId});
+  host.session->setMob({51, 0, 0, NetProtocol::MobTrigger::None, 0, {{600, 3}}});
+  std::vector<Mob> diegoMobs, miltenMobs;
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    for(auto& m:diego.session->takeMobChanges())  diegoMobs.push_back(m);
+    for(auto& m:milten.session->takeMobChanges()) miltenMobs.push_back(m);
+    return diegoMobs.size()>=2 && miltenMobs.size()>=2;
+    });
+  check(ok, "mob changes reach every client");
+  check(ok && miltenMobs[0].mob==50 && miltenMobs[0].state==1 && miltenMobs[0].flags==Mob::Cracked &&
+        miltenMobs[0].trigger==NetProtocol::MobTrigger::Trigger && miltenMobs[1].items.size()==1,
+        "a mob change arrives intact, with its trigger");
+  check(ok && diegoMobs[0].trigger==NetProtocol::MobTrigger::None, "the trigger of a player's own change is left out");
+  check(diego.session->mobs().size()==2 && diego.session->mobs().at(50).trigger==NetProtocol::MobTrigger::None,
+        "a client keeps the mobs without their triggers");
+  host.session->setMob({50, 1, Mob::Cracked});
+  host.session->setMob({51, 1, 0, NetProtocol::MobTrigger::None, 0, {{600, 3}}});
+  diegoMobs.clear();
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    for(auto& m:diego.session->takeMobChanges()) diegoMobs.push_back(m);
+    return !diegoMobs.empty();
+    });
+  check(ok && diegoMobs.size()==1 && diegoMobs[0].mob==51, "an unchanged mob is not sent again");
+
+  NetSession::PlayerMob dmob{0, 16, 51, NetProtocol::MobMove::Take, NetProtocol::NoMobState, 0,
+                             NetProtocol::MobTrigger::None, 600, 2};
+  check(diego.session->sendMob(dmob), "client sends what its character did with a mob");
+  check(!host.session->sendMob(dmob), "the host sends no mob use");
+  auto foreignMob = dmob;
+  foreignMob.entityId = 10;
+  diego.session->sendMob(foreignMob);
+  std::vector<NetSession::PlayerMob> hostMobs;
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    for(auto& m:host.session->takePlayerMobs()) hostMobs.push_back(m);
+    return !hostMobs.empty();
+    });
+  runUntil({&host,&diego,&milten}, [&]{
+    for(auto& m:host.session->takePlayerMobs()) hostMobs.push_back(m);
+    return false;
+    });
+  check(ok && hostMobs.size()==1 && hostMobs[0].playerId==diegoId && hostMobs[0].count==2,
+        "the host gets a player's mob use, not one with another's character");
+  host.session->answerMobTake(diegoId, {51, 600, 2, 1});
+  std::vector<NetSession::MobTaken> diegoAnswers;
+  ok = runUntil({&host,&diego,&milten}, [&]{
+    for(auto& a:diego.session->takeMobAnswers()) diegoAnswers.push_back(a);
+    return !diegoAnswers.empty();
+    });
+  check(ok && diegoAnswers[0].granted==1 && milten.session->takeMobAnswers().empty(),
+        "the answer to a take from a container reaches only its player");
+
   Player gorn;
   gorn.session = NetSession::connect("127.0.0.1", port, "Gorn");
   gorn.attach("Gorn");
@@ -544,6 +598,12 @@ void testSession(uint16_t port) {
         gorn.session->takeRespawns().empty(), "a newcomer gets a respawned character as a plain one");
   check(ok && gorn.session->entities().at(30).instance==101 && gorn.session->entities().at(32).instance==300,
         "a newcomer gets the npcs as they are now");
+  ok = runUntil({&host,&diego,&milten,&gorn}, [&]{ return gorn.session->mobs().size()==2; });
+  {
+  auto gm = gorn.session->takeMobChanges();
+  check(ok && gm.size()==2 && gm[0].trigger==NetProtocol::MobTrigger::None && gm[1].state==1,
+        "a newcomer gets every changed mob as it is now, without triggers");
+  }
   {
   auto gd = gorn.session->takeInventory(diegoId, std::numeric_limits<int64_t>::max());
   auto gh = gorn.session->takeInventory(NetSession::HostPlayer, std::numeric_limits<int64_t>::max());

@@ -54,6 +54,7 @@ class World final {
 
     uint32_t             mobsiId(const Interactive* ptr) const;
     Interactive*         mobsiById(uint32_t id);
+    uint32_t             mobsiCount() const;
 
     uint32_t             itmId(const void* ptr) const;
     Item*                itmById(uint32_t id);
@@ -127,6 +128,7 @@ class World final {
       std::deque<NetProtocol::PlayerAttack> attacks; // received, waiting for the playback of motion to reach them
       std::deque<NetProtocol::PlayerItem>   items;   // likewise: items taken, dropped, used (MP-22)
       bool            unconscious = false; // the player's own character was unconscious in the last state played back
+      std::vector<std::string> anims;      // animations of the player's character using a mob, as last played back (MP-24)
       };
     auto                 remotePlayers() const -> const std::vector<RemotePlayer>& { return remotePl; }
     auto                 remotePlayers()       -> std::vector<RemotePlayer>&       { return remotePl; }
@@ -237,6 +239,22 @@ class World final {
     // kept until taken, at most MaxNetHits of them. entityId and playerId are filled in by the sender.
     void                 addNetItemEvent(const NetProtocol::PlayerItem& e);
     auto                 takeNetItemEvents() -> std::vector<NetProtocol::PlayerItem>;
+    // Multiplayer client: what the local hero has taken out of containers and put into them (MP-24), for NetWorldSync
+    // to send; kept until taken, at most MaxNetHits of them. entityId and playerId are filled in by the sender.
+    void                 addNetMobEvent(const NetProtocol::PlayerMob& e);
+    auto                 takeNetMobEvents() -> std::vector<NetProtocol::PlayerMob>;
+    // Multiplayer: the mobs of this world as NetWorldSync last saw them, one per mob (World::mobsiById) once filled
+    struct NetMob final {
+      int32_t                           state    = NetProtocol::NoMobState;
+      uint8_t                           flags    = 0;  // NetProtocol::MobState::Flag
+      uint32_t                          triggers = 0;  // Interactive::useTriggerCount
+      std::vector<NetProtocol::MobItem> items;         // containers
+      uint32_t                          by       = 0;  // host: the player whose character changed it last, until sent
+      };
+    auto                 netMobs() -> std::vector<NetMob>& { return netMobCache; }
+    // multiplayer client: the host's changes of the mobs the local hero was using when they came, by mob; applied once
+    // it lets go of them
+    auto                 netMobsDeferred() -> std::map<uint32_t,NetProtocol::MobState>& { return netMobWait; }
     size_t               itemCount() const;
     auto                 takeItem   (Item& it) -> std::unique_ptr<Item>;
     void                 removeItem (Item& it);
@@ -292,6 +310,9 @@ class World final {
     std::vector<RemotePlayer>             remotePl;
     std::vector<NetProtocol::Hit>         netHits;
     std::vector<NetProtocol::PlayerItem>  netItemEvents;
+    std::vector<NetProtocol::PlayerMob>   netMobEvents;
+    std::vector<NetMob>                   netMobCache;
+    std::map<uint32_t,NetProtocol::MobState> netMobWait;
     uint64_t                              netNpcsVer = uint64_t(-1);
     std::map<uint32_t,NetNpc>             netNpcMotion;
 

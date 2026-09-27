@@ -82,6 +82,17 @@ void testEncoding() {
         state->bodyState==0x18003 && state->anim==2 && state->walkMode==1 && state->weaponState==3 &&
         state->spell==0x1234,
         "PlayerState round trip");
+  check(state!=nullptr && state->anims.empty(), "PlayerState without mob animations round trip");
+  PlayerState mobUser{4, 17, 2};
+  mobUser.anims = {"T_DOOR_FRONT_S0_2_S1", "S_CHESTSMALL_S1"};
+  auto mu = roundTrip(mobUser, s);
+  check(mu!=nullptr && mu->anims==mobUser.anims, "PlayerState with mob animations round trip");
+  mobUser.anims = {"A", "B", "C", "D", "E"};
+  auto mu4 = roundTrip(mobUser, s);
+  check(mu4!=nullptr && mu4->anims.size()==MaxNpcAnims, "PlayerState animations are limited to MaxNpcAnims");
+  mobUser.anims = {""};
+  auto emptyMobAnim = encode(mobUser);
+  check(!decode(emptyMobAnim.data(), emptyMobAnim.size()), "PlayerState with an empty animation name is refused");
   auto infState = encode(PlayerState{4, 17, 1, 0, 0, 0, 0, std::numeric_limits<float>::infinity()});
   check(!decode(infState.data(), infState.size()), "PlayerState with infinite rotation is refused");
   auto noIdState = encode(PlayerState{4, 0, 1});
@@ -296,6 +307,54 @@ void testEncoding() {
   check(!decode(boolInv.data(), boolInv.size()), "PlayerInventory with an invalid equipped flag is refused");
   auto cutInv = encode(inv);
   check(!decode(cutInv.data(), cutInv.size()-1), "truncated PlayerInventory is refused");
+
+  // mobs (MP-24)
+  MobState door{120, 1, MobState::Cracked, MobTrigger::Trigger, 3, {}};
+  auto dm = roundTrip(door, s);
+  check(dm!=nullptr && *dm==door, "MobState round trip");
+  MobState chest{7, NoMobState, 0, MobTrigger::None, 0, {{0x100, 1}, {0x200, 25}}};
+  auto cm = roundTrip(chest, s);
+  check(cm!=nullptr && *cm==chest, "MobState of a container round trip");
+  auto refusedMob = [&](MobState m, const char* what) {
+    auto pkg = encode(m);
+    check(!decode(pkg.data(), pkg.size()), what);
+    };
+  auto badMob = door; badMob.state = NoMobState-1;       refusedMob(badMob, "MobState below NoMobState is refused");
+  badMob = door; badMob.state = MaxMobState+1;           refusedMob(badMob, "MobState past MaxMobState is refused");
+  badMob = door; badMob.flags = 0x80;                    refusedMob(badMob, "MobState with unknown flags is refused");
+  badMob = door; badMob.trigger = MobTrigger(3);         refusedMob(badMob, "MobState with an unknown trigger is refused");
+  badMob = chest; badMob.items[0].instance = 0;          refusedMob(badMob, "MobState item without instance is refused");
+  badMob = chest; badMob.items[1].count = 0;             refusedMob(badMob, "MobState item of none is refused");
+  badMob = chest; badMob.items[1].instance = 0x100;      refusedMob(badMob, "MobState instance twice is refused");
+  auto cutMob = encode(chest);
+  check(!decode(cutMob.data(), cutMob.size()-1), "truncated MobState is refused");
+
+  PlayerMob mobUse{2, 17, 120, MobMove::State, 1, MobState::Cracked, MobTrigger::Untrigger};
+  auto pu = roundTrip(mobUse, s);
+  check(pu!=nullptr && pu->playerId==2 && pu->entityId==17 && pu->mob==120 && pu->move==MobMove::State &&
+        pu->state==1 && pu->flags==MobState::Cracked && pu->trigger==MobTrigger::Untrigger, "PlayerMob State round trip");
+  PlayerMob takeMob{2, 17, 7, MobMove::Take, NoMobState, 0, MobTrigger::None, 0x200, 10};
+  auto pt = roundTrip(takeMob, s);
+  check(pt!=nullptr && pt->move==MobMove::Take && pt->instance==0x200 && pt->count==10, "PlayerMob Take round trip");
+  auto refusedUse = [&](PlayerMob m, const char* what) {
+    auto pkg = encode(m);
+    check(!decode(pkg.data(), pkg.size()), what);
+    };
+  auto badUse = mobUse; badUse.entityId = 0;                refusedUse(badUse, "PlayerMob without character is refused");
+  badUse = mobUse; badUse.move = MobMove(4);                refusedUse(badUse, "PlayerMob with an unknown move is refused");
+  badUse = mobUse; badUse.instance = 5;                     refusedUse(badUse, "PlayerMob State with an item is refused");
+  badUse = takeMob; badUse.instance = 0;                 refusedUse(badUse, "PlayerMob Take without item is refused");
+  badUse = takeMob; badUse.count = MaxInventoryCount+1;  refusedUse(badUse, "PlayerMob Take of too many is refused");
+  badUse = takeMob; badUse.state = 1;                    refusedUse(badUse, "PlayerMob Take with a state is refused");
+  badUse = takeMob; badUse.move = MobMove::Put; badUse.trigger = MobTrigger::Trigger;
+  refusedUse(badUse, "PlayerMob Put with a trigger is refused");
+
+  auto mt = roundTrip(MobTaken{7, 0x200, 10, 4}, s);
+  check(mt!=nullptr && mt->mob==7 && mt->instance==0x200 && mt->count==10 && mt->granted==4, "MobTaken round trip");
+  auto overGranted = encode(MobTaken{7, 0x200, 10, 11});
+  check(!decode(overGranted.data(), overGranted.size()), "MobTaken granting more than asked is refused");
+  auto noInstTaken = encode(MobTaken{7, 0, 10, 0});
+  check(!decode(noInstTaken.data(), noInstTaken.size()), "MobTaken without item is refused");
 
   auto yes = roundTrip(ItemTaken{22, true}, s);
   check(yes!=nullptr && yes->item==22 && yes->granted, "ItemTaken round trip");
