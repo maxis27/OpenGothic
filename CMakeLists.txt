@@ -249,4 +249,4 @@ if(OPENGOTHIC_BUILD_TESTS)
 endif()
 
 # installation
-install(TARGETS ${PROJECT_NAME} DESTINATION bin)
+install(TARGETS Gothic2Notr Spacer DESTINATION bin)

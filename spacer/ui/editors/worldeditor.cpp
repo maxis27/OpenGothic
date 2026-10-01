@@ -318,19 +318,6 @@ struct WorldEditor::Gizmo {
 WorldEditor::WorldEditor() {
   setFocusPolicy(Tempest::ClickFocus);
 
-  try {
-    // level.reset(new WorldEdit("dragonisland.zen"));
-    level.reset(new WorldEdit("oldworld.zen"));
-
-    camera.setMarvinMode(Camera::M_Free);
-    camera.setPosition(Vec3(0,500,0));
-    camera.setSpin(PointF(0));
-    camera.setAngles(camera.spin());
-    }
-  catch(...) {
-    Tempest::Log::e("unable to load landscape mesh");
-    }
-
   onDelete = Shortcut(*this, Event::M_NoModifier, Event::K_Delete);
   onDelete.onActivated.bind(this, &WorldEditor::deleteVob);
 
@@ -345,14 +332,36 @@ WorldEditor::~WorldEditor() {
   }
 
 std::string_view WorldEditor::title() const {
-  return "World editor";
+  return "";
+  }
+
+void WorldEditor::preload(ProjectItem& it) const {
+  }
+
+bool WorldEditor::load(ProjectItem& it) {
+  try {
+    level.reset(new WorldEdit(it.name()));
+
+    camera.setMarvinMode(Camera::M_Free);
+    camera.setPosition(Vec3(0,500,0));
+    camera.setSpin(PointF(0));
+    camera.setAngles(camera.spin());
+
+    treeDelegate->setWorld(*level);
+
+    return true;
+    }
+  catch(...) {
+    Tempest::Log::e("unable to load landscape mesh");
+    return false;
+    }
   }
 
 BaseEditor::BaseTool* WorldEditor::createToolpanel(ToolWindow::Tool tool) {
   if(tool==ToolWindow::T_VobTree) {
     auto ctrl = new BaseTool();
     auto& list     = ctrl->addWidget(new Tempest::ListView());
-    auto& delegate = *list.setDelegate(new VobTreeDelegate(*level));
+    auto& delegate = *list.setDelegate(new VobTreeDelegate());
     ctrl->setLayout(Vertical);
     delegate.onVobSelected.bind(this, &WorldEditor::selectVob);
 
@@ -515,6 +524,7 @@ void WorldEditor::dropDone(DropOverEvent& ev) {
 
   auto vob = insertVob.get();
   timeline.push(*level, new CmdNewVob(insertVob.release()));
+  invalidateTab();
   selectVob(vob);
   }
 
@@ -651,6 +661,7 @@ void WorldEditor::dragVob(Tempest::Point mpos, WorldEdit::Vob& vob, State st, bo
     }
   vpos = (vpos - gizmoState.pos0);
   timeline.push(*level, new CmdMoveVob(&vob, vpos), false);
+  invalidateTab();
   update();
   }
 
@@ -721,12 +732,14 @@ void WorldEditor::rotateVob(Tempest::Point mpos, WorldEdit::Vob& vob, State st, 
                          r[1][0], r[1][1], r[1][2],
                          r[2][0], r[2][1], r[2][2]);
   timeline.push(*level, new CmdRotateVob(&vob, rt.transpose()), false);
+  invalidateTab();
   update();
   }
 
 void WorldEditor::deleteVob() {
   if(selVob!=nullptr) {
     timeline.push(*level, new CmdDeleteVob(selVob));
+    invalidateTab();
     treeDelegate->update();
     selectVob(nullptr);
     update();
@@ -742,6 +755,7 @@ void WorldEditor::selectVob(WorldEdit::Vob* vob) {
 
 void WorldEditor::setVobProperty(std::unique_ptr<Command::Action<WorldEdit>>& cmd, bool commit) {
   timeline.push(*level, cmd.release(), commit);
+  invalidateTab();
   update();
   }
 
