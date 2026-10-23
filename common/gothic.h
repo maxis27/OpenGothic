@@ -26,9 +26,26 @@ class FightAi;
 class IniFile;
 class NetSession;
 
+class GameModDescriptor {
+  public:
+    GameModDescriptor();
+    GameModDescriptor(std::u16string_view mod, std::u16string_view root);
+    GameModDescriptor(GameModDescriptor&&) = default;
+    ~GameModDescriptor();
+    GameModDescriptor& operator = (GameModDescriptor&&) = default;
+
+    std::unique_ptr<IniFile>    modFile;
+    std::vector<std::u16string> vdf;
+    std::string                 wrldDef, plDef, gameDatDef, ouDef;
+
+  private:
+    void detectVdf(std::vector<std::u16string>& ret, const std::u16string& root,
+                   const std::function<bool(std::u16string_view)>& filter);
+  };
+
 class Gothic final {
   public:
-    Gothic();
+    Gothic(GameModDescriptor desc = {});
     ~Gothic();
 
     static Gothic& inst();
@@ -43,17 +60,13 @@ class Gothic final {
       };
 
     struct Options {
-      GiMethod doGi              = GiMethod::None;
-      uint32_t aaPreset          = 0;
-
       bool     hideFocus         = false;
       float    cameraFov         = 67.5f;
       int      fpsLimit          = 0;
       float    interfaceScale    = 1;
       int      inventoryCellSize = 70;
 
-      Tempest::Size newChapterSize = {800, 600};
-
+      Tempest::Size newChapterSize    = {800, 600};
       Tempest::Size saveGameImageSize = {0, 0};
 
       bool     showHealthBar     = true;

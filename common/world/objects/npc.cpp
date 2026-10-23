@@ -895,7 +895,10 @@ Tempest::Vec3 Npc::animMoveSpeed(uint64_t dt) const {
   }
 
 void Npc::setVisual(const Skeleton* v) {
+  if(visual.visualSkeleton()==v)
+    return;
   visual.setVisual(v);
+  visual.clearOverlays();
   invalidateTalentOverlays();
   }
 
@@ -3506,7 +3509,6 @@ void Npc::commitSpell() {
   if(spellInfo!=0 && transformSpl==nullptr) {
     transformSpl.reset(new TransformBack(*this));
     invent.updateView(*this);
-    visual.clearOverlays();
 
     owner.script().initializeInstanceNpc(hnpc, size_t(spellInfo));
     spellInfo  = 0;
@@ -4937,10 +4939,6 @@ void Npc::transformBack() {
   setVisual(transformSpl->skeleton);
   setVisualBody(vHead,vTeeth,vColor,bdColor,body,head);
   closeWeapon(true);
-
-  // invalidate tallent overlays
-  for(size_t i=0; i<TALENT_MAX_G2; ++i)
-    setTalentSkill(Talent(i),talentsSk[i]);
 
   invent.updateView(*this);
   transformSpl.reset();
