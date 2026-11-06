@@ -44,11 +44,13 @@ Vec3 Parser::loadVec3(std::string_view src) {
 Material::AlphaFunc Parser::loadAlpha(std::string_view src) {
   if(src=="NONE")
     return Material::AlphaTest;
-  if(src=="BLEND")
+  // Gothic 1 HUMAN_WASHSELF1 spells it "BLENND"; read as solid it draws opaque squares
+  if(src=="BLEND" || src=="BLENND")
     return Material::Transparent;
   if(src=="ADD")
     return Material::AdditiveLight;
   if(src=="MUL")
     return Material::Multiply;
+  // TODO: based on finding in G1 - maybe blend is the default fallback?
   return Material::Solid;
   }

@@ -2,9 +2,13 @@
 
 #include <zenkit/Misc.hh>
 
+#include <Tempest/CheckBox>
+
 #include "enumwidget.h"
 #include "floatwidget.h"
 #include "intwidget.h"
+#include "ui/controls/checkwidget.h"
+#include "ui/controls/sliderwidget.h"
 #include "vecwidget.h"
 #include "colorwidget.h"
 #include "stringwidget.h"
@@ -94,7 +98,27 @@ struct ParameterWidget::Base : ParameterWidget {
   size_t  pos = 0;
   };
 
-struct ParameterWidget::EditEnum    : Base<EnumWidget> {
+struct ParameterWidget::EditBool : Base<CheckWidget> {
+  EditBool(size_t pos, std::string_view name):Base(pos,name) {
+    edit->onValueChanged.bind(this, &EditBool::commit);
+    }
+
+  void commit(size_t id) {
+    Variant v;
+    v.set(int(id));
+    onChanged(pos,v,true);
+    }
+
+  Variant argv() const override {
+    return Variant(int(edit->value() ? 1 : 0));
+    }
+
+  void setArgv(const Variant& v) override {
+    edit->setValue(size_t(toNumber(v))!=0);
+    }
+  };
+
+struct ParameterWidget::EditEnum : Base<EnumWidget> {
   EditEnum(size_t pos, std::string_view name):Base(pos,name) {
     edit->onItemSelected.bind(this, &EditEnum::commit);
     }
@@ -120,9 +144,9 @@ struct ParameterWidget::EditColorWidget : Base<ColorWidget> {
     edit->onResize  .bind(this, &EditColorWidget::adjustSize);
     }
 
-  void commit(Vec4,bool) {
+  void commit(Vec4, bool commit) {
     Variant v = argv();
-    onChanged(pos,v,true);
+    onChanged(pos,v,commit);
     }
 
   Variant argv() const override {
@@ -186,7 +210,7 @@ struct ParameterWidget::EditInt1    : Base<IntWidget> {
     }
   };
 
-struct ParameterWidget::EditFloat1  : Base<FloatWidget> {
+struct ParameterWidget::EditFloat1  : Base<SliderWidget> {
   EditFloat1(size_t pos, std::string_view name):Base(pos,name) {
     edit->setUndoRedoEnabled(false);
     edit->onValueModifyed.bind(this, &EditFloat1::commit);
@@ -270,8 +294,7 @@ ParameterWidget* ParameterWidget::implCreateEditor(const Property::Type& type, s
     return ret;
     }
   if(&type==&Property::Type::Bool1) {
-    auto ret = new EditEnum(pos,name);
-    ret->edit->setItems({"False","True"});
+    auto ret = new EditBool(pos,name);
     return ret;
     }
   if(&type==&Property::Type::String) {
