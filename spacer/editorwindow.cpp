@@ -4,6 +4,7 @@
 #include <Tempest/Panel>
 #include <Tempest/ComboBox>
 
+#include "project/projectmgr.h"
 #include "workers/dataworker.h"
 #include "ui/rootview.h"
 
@@ -11,15 +12,28 @@ using namespace Tempest;
 
 Tempest::Signal<void(Tempest::Encoder<Tempest::CommandBuffer>&,uint8_t)> EditorWindow::onUpdate3D;
 
+static EditorWindow* instance = nullptr;
+
 EditorWindow::EditorWindow(Tempest::Device& device)
   : Window(Maximized), device(device), swapchain(device,hwnd()), texAtlass(device), assets(device,texAtlass) {
+  instance = this;
+
   setWindowTitle("Spacer");
   setLayout(Horizontal);
-  addWidget(new RootView()).setFocus(true);
+
+  auto& root = addWidget(new RootView());
+  root.setFocus(true);
   }
 
 EditorWindow::~EditorWindow() {
   device.waitIdle();
+  instance = nullptr;
+  }
+
+void* EditorWindow::mainWindow() {
+  if(instance!=nullptr)
+    return instance->hwnd();
+  return nullptr;
   }
 
 void EditorWindow::render() {
@@ -40,6 +54,8 @@ void EditorWindow::render() {
     sync.wait();
     Resources::resetRecycled(cmdId);
 
+    auto& backbuf = swapchain.acquire();
+
     {
       auto enc = cmd.startEncoding(device);
 
@@ -48,7 +64,7 @@ void EditorWindow::render() {
       dispatchPaintEvent(uiLayer,texAtlass);
       uiMesh[cmdId].update(device,uiLayer);
 
-      enc.setFramebuffer({{swapchain[swapchain.currentImage()],Vec4(0),Tempest::Preserve}});
+      enc.setFramebuffer({{backbuf,Vec4(0),Tempest::Preserve}});
       enc.setViewport(0,0,w(),h());
       uiMesh[cmdId].draw(enc);
     }
@@ -60,4 +76,10 @@ void EditorWindow::render() {
     swapchain.reset();
     update();
     }
+  }
+
+void EditorWindow::resizeEvent(Tempest::SizeEvent& e) {
+  for(auto& i:fence)
+    i.wait();
+  swapchain.reset();
   }

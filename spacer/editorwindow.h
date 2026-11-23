@@ -15,6 +15,8 @@ class EditorWindow : public Tempest::Window {
     explicit EditorWindow(Tempest::Device& device);
     ~EditorWindow() override;
 
+    static void* mainWindow();
+
     static Tempest::Signal<void(Tempest::Encoder<Tempest::CommandBuffer>&,uint8_t)> onUpdate3D;
 
     enum {
@@ -25,6 +27,7 @@ class EditorWindow : public Tempest::Window {
 
   protected:
     void render() override;
+    void resizeEvent(Tempest::SizeEvent& e) override;
 
   private:
     Tempest::Device&           device;

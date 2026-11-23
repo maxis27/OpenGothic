@@ -10,6 +10,7 @@
 #include "project/projectitem.h"
 
 #include "ui/editors/baseeditor.h"
+#include "ui/editors/scripteditor.h"
 #include "ui/editors/worldeditor.h"
 #include "ui/views/projecttree.h"
 #include "ui/views/menubar.h"
@@ -41,7 +42,10 @@ struct EditorArea::EditorWrapper : public Tempest::Widget {
   void paintEvent(Tempest::PaintEvent &e) override {
     if(widgetsCount()==0) {
       Painter p(e);
-      p.drawText(Rect(0,0,w(),h()), "Loading...", Tempest::AlignHCenter|Tempest::AlignVCenter);
+      std::string_view text = "Loading...";
+      if(item.isError())
+        text = "Loading error :(";
+      p.drawText(Rect(0,0,w(),h()), text, Tempest::AlignHCenter|Tempest::AlignVCenter);
       /*
       Painter p(e);
       const uint64_t period = 3000;
@@ -60,6 +64,8 @@ struct EditorArea::EditorWrapper : public Tempest::Widget {
     if(loaded)
       return true;
     if(item.isPending())
+      return false;
+    if(item.isError())
       return false;
     /*
     if(item.projectSettings()==nullptr)
@@ -394,11 +400,16 @@ void EditorArea::load(const ProjectItem& itm) {
     case ProjectItem::T_Dir:
     case ProjectItem::T_File:
     case ProjectItem::T_StaticMesh:
+    case ProjectItem::T_AnimMesh:
     case ProjectItem::T_Texture:
     case ProjectItem::T_ScriptItem:
+    case ProjectItem::T_LightPreset:
       break;
     case ProjectItem::T_World:
       implLoad<WorldEditor>(itm);
+      break;
+    case ProjectItem::T_Script:
+      implLoad<ScriptEditor>(itm);
       break;
     }
   }
@@ -427,6 +438,23 @@ void EditorArea::implLoad(const ProjectItem& itm) {
   loadTimer.start(1);
 
   showEditor(editor.size()-1);
+  }
+
+void EditorArea::focusVobSearch() {
+  auto* ed = currentEditor();
+  if(ed==nullptr)
+    return;
+
+  auto* world = dynamic_cast<WorldEditor*>(ed->edit.get());
+  if(world==nullptr)
+    return;
+
+  auto* tool = window[ToolWindow::T_VobTree];
+  if(tool==nullptr || tool->owner()==nullptr)
+    return;
+  if(auto* group = dynamic_cast<ToolGroup*>(tool->owner()->owner()))
+    group->selectTool(*tool);
+  world->focusVobSearch();
   }
 
 void EditorArea::save() {

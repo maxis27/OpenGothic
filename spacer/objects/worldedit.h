@@ -6,8 +6,11 @@
 #include <zenkit/vobs/VirtualObject.hh>
 
 #include "physics/physicmesh.h"
+#include "graphics/mdlvisual.h"
 #include "graphics/lightgroup.h"
 #include "graphics/meshobjects.h"
+#include "graphics/mesh/pose.h"
+#include "graphics/objvisual.h"
 #include "command.h"
 
 class DynamicWorld;
@@ -52,9 +55,11 @@ class WorldEdit {
 
         std::vector<std::unique_ptr<Vob>>      child;
         std::shared_ptr<zenkit::VirtualObject> orig;
+        bool                                   physics = true;
 
         PhysicMesh        phys;
         MeshObjects::Mesh mesh;
+        MdlVisual         mdl;
         LightGroup::Light light;
 
       friend class WorldEdit;
@@ -62,7 +67,6 @@ class WorldEdit {
       friend class CmdNewVob;
       friend class CmdDeleteVob;
 
-      template<class Vob, class F>
       friend class CmdSetProperty;
       };
 
@@ -135,37 +139,4 @@ class CmdRotateVob : public Command::Action<WorldEdit> {
 
     WorldEdit::Vob* vob = nullptr;
     zenkit::Mat3    ang, orig;
-  };
-
-template<class Vob, class F>
-class CmdSetProperty: public Command::Action<WorldEdit> {
-  public:
-    CmdSetProperty(WorldEdit::Vob* vob, F Vob::* field, const F& v) : vob(vob), field(field), value(v) {}
-
-  private:
-    void redo(WorldEdit& subj) override {
-      auto& vx = *dynamic_cast<Vob*>(vob->orig.get());
-      auto& f  = (vx.*field);
-      std::swap(f, value);
-      //TODO: easeup non-visivic properties
-      //TODO: easeup non-committed props
-      vob->initView(subj);
-      }
-
-    void undo(WorldEdit& subj) override {
-      redo(subj);
-      }
-
-    bool merge(const Action& prev) override {
-      if(auto p = dynamic_cast<const CmdSetProperty<Vob,F>*>(&prev)) {
-        if(p->vob==vob && p->field==field) {
-          return true;
-          }
-        }
-      return false;
-      }
-
-    WorldEdit::Vob* vob;
-    F Vob::*        field;
-    F               value;
   };

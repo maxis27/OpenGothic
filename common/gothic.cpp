@@ -32,10 +32,10 @@ using namespace Tempest;
 using namespace FileUtil;
 
 GameModDescriptor::GameModDescriptor()
-  : GameModDescriptor(CommandLine::inst().modPath(), CommandLine::inst().nestedPath({u"Data"},Dir::FT_Dir)) {
+  : GameModDescriptor(CommandLine::inst().modPath(), CommandLine::inst().nestedPath({u"Data"},Dir::FT_Dir), u"") {
   }
 
-GameModDescriptor::GameModDescriptor(std::u16string_view mod, std::u16string_view root) {
+GameModDescriptor::GameModDescriptor(std::u16string_view mod, std::u16string_view root, std::u16string_view workSrc) {
   if(!mod.empty()){
     modFile.reset(new IniFile(mod));
     }
@@ -83,13 +83,17 @@ GameModDescriptor::GameModDescriptor(std::u16string_view mod, std::u16string_vie
         }
       return false;
       });
+
+  if(!workSrc.empty()) {
+    detectSrc(src, std::u16string(workSrc));
+    }
   }
 
 GameModDescriptor::~GameModDescriptor() {
   }
 
 void GameModDescriptor::detectVdf(std::vector<std::u16string>& ret, const std::u16string& root, const std::function<bool(std::u16string_view)>& filter) {
-  Dir::scan(root,[this,&root,&ret,&filter](const std::u16string& vdf, Dir::FileType t){
+  Dir::scan(root,[this,&root,&ret,&filter](const std::u16string& vdf, Dir::FileType t) {
     if(t==Dir::FT_File) {
       auto file = root + vdf;
       if(std::filesystem::file_size(file)==0)
@@ -107,6 +111,23 @@ void GameModDescriptor::detectVdf(std::vector<std::u16string>& ret, const std::u
     if(t==Dir::FT_Dir && vdf!=u".." && vdf!=u".") {
       auto dir = root + vdf + u"/";
       detectVdf(ret,dir,filter);
+      }
+    });
+  }
+
+void GameModDescriptor::detectSrc(std::vector<std::u16string>& ret, const std::u16string& root) {
+  Dir::scan(root, [this, &ret, &root](const std::u16string& src, Dir::FileType t) {
+    if(t==Dir::FT_File) {
+      if(!FileExt::hasExt(src, u"src")) {
+        return;
+        }
+      auto file = root + src;
+      ret.push_back(file);
+      return;
+      }
+    if(t==Dir::FT_Dir && src!=u".." && src!=u".") {
+      auto dir = root + src + u"/";
+      detectSrc(ret, dir);
       }
     });
   }
@@ -826,25 +847,17 @@ zenkit::DaedalusScript Gothic::loadScript(std::string_view datFile, const Script
     return script;
     }
 
-  char16_t str16[256] = {};
-  for(size_t i=0; i<datFile.size() && i<255; ++i)
-    str16[i] = char16_t(datFile[i]);
-
   auto gscript = CommandLine::inst().scriptPath();
-  auto path    = caseInsensitiveSegment(gscript,str16,Dir::FT_File);
+  auto path    = caseInsensitiveSegment(gscript,datFile,Dir::FT_File);
   if(!FileUtil::exists(path) && int(lang)>=0) {
     gscript = CommandLine::inst().scriptPath(lang);
-    path    = caseInsensitiveSegment(gscript,str16,Dir::FT_File);
+    path    = caseInsensitiveSegment(gscript,datFile,Dir::FT_File);
     }
   if(!FileUtil::exists(path) && int(lang)>=0) {
     datFile = datFile.substr(segment+1);
-    for(size_t i=0; i<datFile.size() && i<255; ++i)
-      str16[i] = char16_t(datFile[i]);
-    str16[datFile.size()] = u'\0';
     gscript = CommandLine::inst().scriptPath(lang);
-    path    = caseInsensitiveSegment(gscript,str16,Dir::FT_File);
+    path    = caseInsensitiveSegment(gscript,datFile,Dir::FT_File);
     }
-
   auto buf = zenkit::Read::from(path);
   zenkit::DaedalusScript script;
   script.load(buf.get());

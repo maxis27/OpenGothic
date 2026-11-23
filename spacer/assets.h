@@ -24,12 +24,17 @@ class Assets {
       Tempest::Icon close_save;
       Tempest::Icon more;
       Tempest::Icon add;
+      Tempest::Icon target;
+      Tempest::Icon locationSearching;
+      Tempest::Icon search;
+      Tempest::Icon filterList;
       Tempest::Icon down, up;
       Tempest::Icon tri_close, tri_open, tri_open_small;
       Tempest::Icon check_off, check_on;
 
       Tempest::Icon file_project;
       Tempest::Icon file_large;
+      Tempest::Icon file_script;
       Tempest::Icon folder_large;
 
       Tempest::Icon circle;

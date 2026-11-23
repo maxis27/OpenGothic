@@ -62,11 +62,15 @@ struct Shelf::Item : ProjectItemView {
     else if(it.type()==ProjectItem::T_Dir) {
       drawIcon(p, Assets::inst().ic.folder_large);
       }
-    else if(it.type()==ProjectItem::T_StaticMesh || it.type()==ProjectItem::T_ScriptItem) {
+    else if(it.type()==ProjectItem::T_StaticMesh || it.type()==ProjectItem::T_AnimMesh ||
+            it.type()==ProjectItem::T_ScriptItem) {
       auto pr = it.preview();
       if(pr!=nullptr)
         drawIcon(p, *pr); else
         drawIcon(p, Assets::inst().ic.file_large);
+      }
+    else if(it.type()==ProjectItem::T_Script) {
+      drawIcon(p, Assets::inst().ic.file_script);
       }
     else if(it.type()==ProjectItem::T_Texture) {
       auto pr = it.preview();
@@ -129,12 +133,15 @@ struct Shelf::Central : Widget {
           filterFn = [](const ProjectItem&)    { return true; };
           break;
         case 1:
-          filterFn = [](const ProjectItem& it) { return it.type()==ProjectItem::T_StaticMesh; };
+          filterFn = [](const ProjectItem& it) { return it.type()==ProjectItem::T_StaticMesh ||
+                                                        it.type()==ProjectItem::T_AnimMesh; };
           break;
         case 2:
           filterFn = [](const ProjectItem& it) { return it.type()==ProjectItem::T_Texture; };
           break;
         case 3:
+        case 4:
+        case 5:
           filterFn = [](const ProjectItem& it) { return true; };
           break;
         default:
@@ -228,6 +235,10 @@ struct Shelf::Central : Widget {
           indexFolder();
         else if(owner.categoryId==3)
           indexType(ProjectMgr::inst().cItemRoot());
+        else if(owner.categoryId==4)
+          indexType(ProjectMgr::inst().lightsRoot());
+        else if(owner.categoryId==5)
+          indexType(ProjectMgr::inst().scriptRoot());
         else
           indexType(ProjectMgr::inst().vdf(proj));
         }
@@ -327,13 +338,14 @@ struct Shelf::PathItem : Tempest::Button {
   };
 
 struct Shelf::Delegate : Tempest::ListDelegate {
-  constexpr static std::string_view txt[6] = {
+  constexpr static std::string_view txt[7] = {
     "Files",
     "Meshes",
     "Textures",
     "Items",
     "Light presets",
-    "UI"
+    "Script",
+    "UI",
     };
 
   Delegate(Shelf& owner):owner(owner){}

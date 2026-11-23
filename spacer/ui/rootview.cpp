@@ -3,14 +3,12 @@
 #include <Tempest/Log>
 #include <Tempest/Painter>
 
-#include "ui/dialogs/openfiledialog.h"
+#include "ui/dialogs/importdialog.h"
 #include "project/projectmgr.h"
 #include "project/projectitem.h"
 #include "editorarea.h"
 #include "editorsettings.h"
-#include "editorwindow.h"
 #include "commandline.h"
-#include "gothic.h"
 #include "assets.h"
 
 using namespace Tempest;
@@ -27,32 +25,20 @@ RootView::RootView() {
 
   initShortkuts();
   EditorSettings::inst().onShortcuts.bind(this,&RootView::setupShortkuts);
-  /*
-  ProjectMgr::inst().onAssetReady.bind(this,&RootView::update);
-  if(!ProjectMgr::inst().hasVisibleProject()) {
-    RootView::inst().onNewFile();
-    } else {
-    edit->openApp();
-    }
-  */
-  onOpenProjectF(std::filesystem::path(CommandLine::inst().modPath()));
 
-  auto ow = ProjectMgr::inst().find("OLDWORLD.ZEN");
-  edit->load(ow); // TEMP: start level view
+  auto path = CommandLine::inst().modPath();
+  if(path.empty()) {
+    if(!onOpenProject())
+      SystemApi::exit();
+    } else {
+    onOpenProjectF(std::filesystem::path(path));
+    }
+
   setFocus(true);
   }
 
 RootView& RootView::inst() {
   return *instance;
-  }
-
-void* RootView::mainWindow() {
-  auto w = instance->owner();
-  while(w->owner()!=nullptr)
-    w = w->owner();
-  if(auto wx = dynamic_cast<EditorWindow*>(w))
-    return wx->hwnd();
-  return nullptr;
   }
 
 void RootView::paintEvent(PaintEvent& e) {
@@ -78,6 +64,9 @@ void RootView::initShortkuts() {
 
   scRedo    = Shortcut(*this,Event::M_Command,   Event::K_Y);
   scRedo.onActivated.bind(this,&RootView::onRedo);
+
+  scSearchVobs = Shortcut(*this, Event::M_Ctrl, Event::K_L);
+  scSearchVobs.onActivated.bind(edit, &EditorArea::focusVobSearch);
   }
 
 void RootView::setupShortkuts() {
@@ -121,8 +110,8 @@ void RootView::onRedo() {
   }
 
 bool RootView::onOpenProject() {
-  auto proj = OpenFileDialog::getProjOpenFileName("");
-  return onOpenProjectF(proj);
+  ImportDialog dialog;
+  return onOpenProjectF(dialog.selectProject());
   }
 
 bool RootView::onOpenProjectF(const std::filesystem::path& proj) {
@@ -133,6 +122,11 @@ bool RootView::onOpenProjectF(const std::filesystem::path& proj) {
   if(!ProjectMgr::inst().addProject(proj))
     return false;
   edit->openApp();
+  auto def = CommandLine::inst().wrldDef;
+  if(def.empty() || true)
+    def = "OLDWORLD.ZEN";
+  auto ow = ProjectMgr::inst().find(def);
+  edit->load(ow); // TEMP: start level view
   return true;
   }
 

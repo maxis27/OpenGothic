@@ -15,7 +15,6 @@ class RootView : public Tempest::Widget {
     RootView();
 
     static RootView& inst();
-    static void*     mainWindow();
 
     void onNewFile();
     void onSave();
@@ -37,6 +36,7 @@ class RootView : public Tempest::Widget {
     Tempest::Shortcut      scSave;
     Tempest::Shortcut      scUndo;
     Tempest::Shortcut      scRedo;
+    Tempest::Shortcut      scSearchVobs;
 
     EditorArea*            edit = nullptr;
 
